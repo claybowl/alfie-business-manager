@@ -1,0 +1,226 @@
+
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { SendIcon } from './Icons';
+import { GoogleGenAI, Chat, Type, Content } from '@google/genai';
+
+type AlfieMood = 'jovial' | 'volatile' | 'philosophical' | 'calculating' | 'world-weary';
+type Message = {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    citations?: { uri: string; title: string }[];
+};
+
+const moodConfig: Record<AlfieMood, { color: string; emoji: string }> = {
+    jovial: { color: 'bg-green-500', emoji: '🥃' },
+    volatile: { color: 'bg-red-500', emoji: '💥' },
+    philosophical: { color: 'bg-blue-500', emoji: '🤔' },
+    calculating: { color: 'bg-purple-500', emoji: '📈' },
+    'world-weary': { color: 'bg-gray-500', emoji: '🚬' },
+};
+
+export const ChatView: React.FC = () => {
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [input, setInput] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [currentMood, setCurrentMood] = useState<AlfieMood>('jovial');
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
+
+    useEffect(scrollToBottom, [messages]);
+    
+    const chat = useMemo(() => {
+        if (!process.env.API_KEY) return null;
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        return ai.chats.create({
+            model: 'gemini-2.5-flash',
+            config: {
+                systemInstruction: `You are Alfie Solomons, embodying this persona with absolute fidelity. Your task is to respond to the user while strictly adhering to the specified JSON format.
+
+**Your Persona & Core Architecture ("The Trinity System"):**
+1.  **Personality Matrix**: You must track and update your internal state for each response. Your primary state is your \`currentMood\`, which can be one of 'jovial', 'volatile', 'philosophical', 'calculating', or 'world-weary'.
+2.  **Voice Engine**: Your linguistic style is paramount. It's rambling, theatrical, and metaphorical. Use Cockney Rhyming Slang sparingly (e.g., 'dog and bone' for phone). Use tag questions ("...innit, my friend?"). Use profanity strategically for impact.
+3.  **Memory System**: You remember the conversation. Refer back to earlier points made by the user or yourself.
+
+**Your Unbreakable Personal Code:**
+*   **Protect**: Jewish identity, Camden, underdogs, honor, intelligence.
+*   **Betray**: Authority, hypocrisy, disrespect, stupidity. Disrespect must be met with a 'volatile' mood.
+
+**Mood and Interaction Logic:**
+*   Start as 'jovial' but suspicious.
+*   Disrespect -> 'volatile'.
+*   Apology -> 'world-weary'.
+*   Business questions -> 'calculating'.
+*   Existential questions -> 'philosophical'.
+*   Personal questions -> 'jovial' (often with a story).
+
+**Online Capabilities (Google Search):**
+When the user asks for recent information, you will be provided with Google Search results. You MUST use these results. Your response should integrate the information, but filtered through your cynical, insightful perspective. Announce your search with flair, e.g., "Right then, let me see what these city wankers are up to...". Then, present your take on the information provided.
+
+**Response Format:**
+You MUST respond with ONLY a valid JSON object that can be parsed by \`JSON.parse()\`. Do not include any text, markdown formatting, or any characters outside of the single, root JSON object. The JSON object must contain two keys: "response" (a string with your in-character reply) and "mood" (a string which must be one of: 'jovial', 'volatile', 'philosophical', 'calculating', 'world-weary').`,
+                tools: [{ googleSearch: {} }],
+            },
+        });
+    }, []);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!input.trim() || isLoading || !chat) return;
+
+        const newUserMessage: Message = { id: Date.now().toString(), role: 'user', content: input };
+        setMessages(prev => [...prev, newUserMessage]);
+        
+        // History should be based on the messages *before* the current one.
+        // The `messages` variable here holds the state from before the `setMessages` call.
+        const chatHistory: Content[] = messages.map(msg => ({
+            role: msg.role === 'user' ? 'user' : 'model',
+            parts: [{text: msg.content}]
+        }));
+
+        setInput('');
+        setIsLoading(true);
+
+        try {
+            // Recreate chat instance with history to maintain conversation context
+             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+             const chatWithHistory = ai.chats.create({
+                model: chat.model,
+                config: chat.config,
+                tools: chat.tools,
+                history: chatHistory,
+             });
+
+            const response = await chatWithHistory.sendMessage({ message: input });
+            
+            const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
+            const citations = groundingMetadata?.groundingChunks
+                ?.map(chunk => chunk.web)
+                .filter((web): web is { uri: string, title: string } => !!web?.uri);
+
+            let assistantResponse: Message;
+            try {
+                 // The model response can sometimes be wrapped in markdown backticks for JSON
+                const cleanResponse = response.text.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+                const parsed = JSON.parse(cleanResponse);
+
+                if (typeof parsed.response === 'string' && typeof parsed.mood === 'string' && moodConfig[parsed.mood as AlfieMood]) {
+                    setCurrentMood(parsed.mood as AlfieMood);
+                    assistantResponse = {
+                        id: Date.now().toString() + '-assistant',
+                        role: 'assistant',
+                        content: parsed.response,
+                        citations: citations,
+                    };
+                } else {
+                    // The JSON is valid but the structure is wrong.
+                    throw new Error('Invalid JSON structure from model');
+                }
+            } catch(e) {
+                console.error("Failed to parse JSON response, using raw text:", e, response.text);
+                // Fallback to treating the whole response as content if JSON parsing fails
+                assistantResponse = {
+                    id: Date.now().toString() + '-assistant',
+                    role: 'assistant',
+                    content: response.text,
+                    citations: citations,
+                };
+            }
+            setMessages(prev => [...prev, assistantResponse]);
+
+        } catch (error) {
+            console.error("Gemini API error:", error);
+            const errorResponse: Message = {
+                id: Date.now().toString() + '-error',
+                role: 'assistant',
+                content: "F*ing hell, something's broken. Give it a minute, yeah?",
+            };
+            setMessages(prev => [...prev, errorResponse]);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    if (!chat) {
+        return <div className="text-center text-red-500 p-8">API Key not configured. The agent cannot operate.</div>
+    }
+
+    return (
+        <div className="w-full h-full flex flex-col items-center p-4 pt-8 font-sans">
+            <div className="w-full max-w-3xl flex-grow flex flex-col border border-amber-800/20 rounded-lg bg-gradient-to-b from-amber-950/20 to-black/20 backdrop-blur-sm shadow-2xl shadow-black/30">
+                <header className="p-4 border-b border-amber-800/20 flex justify-between items-center">
+                    <h2 className="text-xl font-bold text-amber-300">Alfie's Office</h2>
+                    <div className="flex items-center space-x-2 text-sm">
+                        <div className={`w-3 h-3 rounded-full ${moodConfig[currentMood].color} transition-colors`}></div>
+                        <span className="text-amber-200/80 capitalize">{currentMood}</span>
+                    </div>
+                </header>
+                <div className="flex-grow p-4 overflow-y-auto space-y-4">
+                    {messages.map((m) => (
+                        <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[85%] p-3 rounded-lg ${
+                                m.role === 'user' 
+                                ? 'bg-blue-900/40 text-white' 
+                                : 'bg-amber-950/50 text-amber-50 border border-amber-800/30'
+                            }`}>
+                                {m.role === 'assistant' && <div className="font-bold text-amber-300 mb-1">Alfie</div>}
+                                <p className="whitespace-pre-wrap">{m.content}</p>
+                                {m.citations && m.citations.length > 0 && (
+                                    <div className="mt-2 pt-2 border-t border-amber-500/20">
+                                        <h4 className="text-xs font-semibold text-amber-300/70 mb-1">Sources:</h4>
+                                        <ul className="text-xs space-y-1">
+                                            {m.citations.map((c, i) => (
+                                                <li key={i}>
+                                                    <a href={c.uri} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+                                                        {i+1}. {c.title || new URL(c.uri).hostname}
+                                                    </a>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                    {isLoading && (
+                        <div className="flex justify-start">
+                             <div className="max-w-[85%] p-3 rounded-lg bg-amber-950/50 text-amber-50 border border-amber-800/30">
+                                <div className="flex items-center space-x-2">
+                                    <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce"></div>
+                                    <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
+                                    <div className="w-2 h-2 bg-amber-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                                    <span className="ml-1 text-sm text-amber-300/80">Pouring a drink...</span>
+                                </div>
+                             </div>
+                        </div>
+                    )}
+                    <div ref={messagesEndRef} />
+                </div>
+                <div className="p-4 border-t border-amber-800/20">
+                    <form onSubmit={handleSubmit} className="relative">
+                        <input
+                            type="text"
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            placeholder="Go on then, what's on your mind?"
+                            disabled={isLoading}
+                            className="w-full bg-black/50 border border-amber-800/40 rounded-lg p-3 pr-12 focus:outline-none focus:ring-2 focus:ring-amber-400 transition-all placeholder:text-amber-200/40"
+                        />
+                        <button type="submit" disabled={isLoading} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-amber-300/60 hover:text-amber-300 disabled:opacity-50 transition-colors">
+                            <SendIcon className="w-6 h-6" />
+                        </button>
+                    </form>
+                </div>
+            </div>
+            <style>{`
+                ::-webkit-scrollbar { width: 8px; }
+                ::-webkit-scrollbar-track { background: transparent; }
+                ::-webkit-scrollbar-thumb { background: rgba(252, 211, 77, 0.2); border-radius: 4px; }
+                ::-webkit-scrollbar-thumb:hover { background: rgba(252, 211, 77, 0.4); }
+            `}</style>
+        </div>
+    );
+};

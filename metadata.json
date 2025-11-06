@@ -1,0 +1,7 @@
+{
+  "name": "Alfie the AI Agent",
+  "description": "A visual interface for a transdimensional AI agent, inspired by Alfie Solomons. Speak to the orb and watch it respond.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
