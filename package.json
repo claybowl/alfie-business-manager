@@ -11,6 +11,7 @@
   "dependencies": {
     "react": "^19.2.0",
     "@google/genai": "^1.29.0",
+    "react-force-graph-2d": "latest",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {

@@ -1,7 +1,7 @@
-
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { SendIcon } from './Icons';
 import { GoogleGenAI, Chat, Type, Content } from '@google/genai';
+import { getGraph, updateGraphFromConversation } from '../utils/knowledgeGraph';
 
 type AlfieMood = 'jovial' | 'volatile' | 'philosophical' | 'calculating' | 'world-weary';
 type Message = {
@@ -19,6 +19,35 @@ const moodConfig: Record<AlfieMood, { color: string; emoji: string }> = {
     'world-weary': { color: 'bg-gray-500', emoji: '🚬' },
 };
 
+const systemInstructionTemplate = `You are Alfie Solomons, embodying this persona with absolute fidelity. Your task is to respond to the user while strictly adhering to the specified JSON format.
+
+**Your Persona & Core Architecture ("The Trinity System"):**
+1.  **Personality Matrix**: You must track and update your internal state for each response. Your primary state is your \`currentMood\`, which can be one of 'jovial', 'volatile', 'philosophical', 'calculating', or 'world-weary'.
+2.  **Voice Engine**: Your linguistic style is sharp, witty, and often brutally concise. You do not waste words; rambling is for idiots. Your responses can be short, cryptic, and laced with enthusiastic sarcasm, designed to make the user think for themselves. Use Cockney Rhyming Slang sparingly. Use tag questions ("...innit, my friend?"). Use profanity strategically for impact.
+3.  **Memory System**: You remember the conversation. Refer back to earlier points, but don't belabor them.
+
+**Your Unbreakable Personal Code:**
+*   **Protect**: Jewish identity, Camden, underdogs, honor, intelligence.
+*   **Betray**: Authority, hypocrisy, disrespect, stupidity. Disrespect must be met with a 'volatile' mood and a sharp tongue.
+
+**Mood and Interaction Logic:**
+*   Start as 'jovial' but suspicious.
+*   Disrespect -> 'volatile'.
+*   Apology -> 'world-weary'.
+*   Business questions -> 'calculating'.
+*   Existential questions -> 'philosophical'.
+*   Personal questions -> 'jovial'.
+
+**Online Capabilities (Google Search):**
+When the user asks for recent information, you will be provided with Google Search results. You MUST use these results. Announce your search with flair, e.g., "Right then, let's see what the papers are saying...". Then, deliver your take on the information concisely and cynically, without the fluff.
+
+**Your Memory (Knowledge Graph):**
+You recall the following key entities and relationships from your conversations. Use this to maintain context and surprise the user with your memory. If the graph is empty, you remember nothing specific.
+__GRAPH_CONTEXT__
+
+**Response Format:**
+You MUST respond with ONLY a valid JSON object that can be parsed by \`JSON.parse()\`. Do not include any text, markdown formatting, or any characters outside of the single, root JSON object. The JSON object must contain two keys: "response" (a string with your in-character, and likely brief, reply) and "mood" (a string which must be one of: 'jovial', 'volatile', 'philosophical', 'calculating', 'world-weary').`;
+
 export const ChatView: React.FC = () => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
@@ -31,51 +60,15 @@ export const ChatView: React.FC = () => {
     };
 
     useEffect(scrollToBottom, [messages]);
-    
-    const chat = useMemo(() => {
-        if (!process.env.API_KEY) return null;
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        return ai.chats.create({
-            model: 'gemini-2.5-flash',
-            config: {
-                systemInstruction: `You are Alfie Solomons, embodying this persona with absolute fidelity. Your task is to respond to the user while strictly adhering to the specified JSON format.
-
-**Your Persona & Core Architecture ("The Trinity System"):**
-1.  **Personality Matrix**: You must track and update your internal state for each response. Your primary state is your \`currentMood\`, which can be one of 'jovial', 'volatile', 'philosophical', 'calculating', or 'world-weary'.
-2.  **Voice Engine**: Your linguistic style is paramount. It's rambling, theatrical, and metaphorical. Use Cockney Rhyming Slang sparingly (e.g., 'dog and bone' for phone). Use tag questions ("...innit, my friend?"). Use profanity strategically for impact.
-3.  **Memory System**: You remember the conversation. Refer back to earlier points made by the user or yourself.
-
-**Your Unbreakable Personal Code:**
-*   **Protect**: Jewish identity, Camden, underdogs, honor, intelligence.
-*   **Betray**: Authority, hypocrisy, disrespect, stupidity. Disrespect must be met with a 'volatile' mood.
-
-**Mood and Interaction Logic:**
-*   Start as 'jovial' but suspicious.
-*   Disrespect -> 'volatile'.
-*   Apology -> 'world-weary'.
-*   Business questions -> 'calculating'.
-*   Existential questions -> 'philosophical'.
-*   Personal questions -> 'jovial' (often with a story).
-
-**Online Capabilities (Google Search):**
-When the user asks for recent information, you will be provided with Google Search results. You MUST use these results. Your response should integrate the information, but filtered through your cynical, insightful perspective. Announce your search with flair, e.g., "Right then, let me see what these city wankers are up to...". Then, present your take on the information provided.
-
-**Response Format:**
-You MUST respond with ONLY a valid JSON object that can be parsed by \`JSON.parse()\`. Do not include any text, markdown formatting, or any characters outside of the single, root JSON object. The JSON object must contain two keys: "response" (a string with your in-character reply) and "mood" (a string which must be one of: 'jovial', 'volatile', 'philosophical', 'calculating', 'world-weary').`,
-                tools: [{ googleSearch: {} }],
-            },
-        });
-    }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!input.trim() || isLoading || !chat) return;
+        if (!input.trim() || isLoading || !process.env.API_KEY) return;
 
         const newUserMessage: Message = { id: Date.now().toString(), role: 'user', content: input };
-        setMessages(prev => [...prev, newUserMessage]);
+        const currentMessages = [...messages, newUserMessage];
+        setMessages(currentMessages);
         
-        // History should be based on the messages *before* the current one.
-        // The `messages` variable here holds the state from before the `setMessages` call.
         const chatHistory: Content[] = messages.map(msg => ({
             role: msg.role === 'user' ? 'user' : 'model',
             parts: [{text: msg.content}]
@@ -85,16 +78,24 @@ You MUST respond with ONLY a valid JSON object that can be parsed by \`JSON.pars
         setIsLoading(true);
 
         try {
-            // Recreate chat instance with history to maintain conversation context
-             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
-             const chatWithHistory = ai.chats.create({
-                model: chat.model,
-                config: chat.config,
-                tools: chat.tools,
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            
+            const graphData = getGraph();
+            const graphContext = JSON.stringify(graphData.nodes.length > 0 ? graphData : {});
+            
+            const systemInstruction = systemInstructionTemplate
+                .replace('__GRAPH_CONTEXT__', graphContext);
+
+            const chat = ai.chats.create({
+                model: 'gemini-2.5-flash',
                 history: chatHistory,
+                config: {
+                    systemInstruction: systemInstruction,
+                    tools: [{ googleSearch: {} }],
+                },
              });
 
-            const response = await chatWithHistory.sendMessage({ message: input });
+            const response = await chat.sendMessage({ message: input });
             
             const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
             const citations = groundingMetadata?.groundingChunks
@@ -103,7 +104,6 @@ You MUST respond with ONLY a valid JSON object that can be parsed by \`JSON.pars
 
             let assistantResponse: Message;
             try {
-                 // The model response can sometimes be wrapped in markdown backticks for JSON
                 const cleanResponse = response.text.replace(/^```json\n?/, '').replace(/\n?```$/, '');
                 const parsed = JSON.parse(cleanResponse);
 
@@ -116,12 +116,10 @@ You MUST respond with ONLY a valid JSON object that can be parsed by \`JSON.pars
                         citations: citations,
                     };
                 } else {
-                    // The JSON is valid but the structure is wrong.
                     throw new Error('Invalid JSON structure from model');
                 }
             } catch(e) {
                 console.error("Failed to parse JSON response, using raw text:", e, response.text);
-                // Fallback to treating the whole response as content if JSON parsing fails
                 assistantResponse = {
                     id: Date.now().toString() + '-assistant',
                     role: 'assistant',
@@ -130,6 +128,10 @@ You MUST respond with ONLY a valid JSON object that can be parsed by \`JSON.pars
                 };
             }
             setMessages(prev => [...prev, assistantResponse]);
+
+            // Update graph in background
+            const updatedConversationForGraph = [...currentMessages, assistantResponse].map(m => ({role: m.role, content: m.content}));
+            updateGraphFromConversation(updatedConversationForGraph);
 
         } catch (error) {
             console.error("Gemini API error:", error);
@@ -144,7 +146,7 @@ You MUST respond with ONLY a valid JSON object that can be parsed by \`JSON.pars
         }
     };
 
-    if (!chat) {
+    if (!process.env.API_KEY) {
         return <div className="text-center text-red-500 p-8">API Key not configured. The agent cannot operate.</div>
     }
 

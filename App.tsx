@@ -37,7 +37,7 @@ const App: React.FC = () => {
       <header className="relative w-full flex-shrink-0 border-b border-gray-800/50 backdrop-blur-sm z-10">
         <div className="container mx-auto px-4 flex justify-between items-center">
             <h1 className="text-xl font-bold text-amber-400/80 py-3">Alfie Solomons</h1>
-            <Tabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+            <Tabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab as (id: string) => void} />
         </div>
       </header>
       
