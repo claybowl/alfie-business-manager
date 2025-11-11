@@ -39,3 +39,13 @@ export const SettingsIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => 
         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
     </svg>
 );
+
+export const KnowledgeGraphIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.5a1.5 1.5 0 0 1 1.5-1.5h1.5a1.5 1.5 0 0 1 1.5 1.5v1.5a1.5 1.5 0 0 1-1.5 1.5H4.5a1.5 1.5 0 0 1-1.5-1.5v-1.5Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 6.75a1.5 1.5 0 0 1 1.5-1.5h1.5a1.5 1.5 0 0 1 1.5 1.5v1.5a1.5 1.5 0 0 1-1.5 1.5h-1.5a1.5 1.5 0 0 1-1.5-1.5v-1.5Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 13.5a1.5 1.5 0 0 1 1.5-1.5h1.5a1.5 1.5 0 0 1 1.5 1.5v1.5a1.5 1.5 0 0 1-1.5 1.5h-1.5a1.5 1.5 0 0 1-1.5-1.5v-1.5Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 15v.75a3 3 0 0 0 3 3h3.75a3 3 0 0 0 3-3V15m-6 .75h3.75" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9.75v3" />
+    </svg>
+);

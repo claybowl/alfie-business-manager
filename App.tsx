@@ -5,7 +5,7 @@ import { AgentView } from './components/AgentView';
 import { ChatView } from './components/ChatView';
 import { ContextView } from './components/ContextView';
 import { SettingsView } from './components/SettingsView';
-import { ChatIcon, DocumentIcon, MicrophoneIcon, SettingsIcon } from './components/Icons';
+import { ChatIcon, KnowledgeGraphIcon, MicrophoneIcon, SettingsIcon } from './components/Icons';
 
 type TabId = 'agent' | 'chat' | 'context' | 'settings';
 
@@ -15,23 +15,15 @@ const App: React.FC = () => {
   const tabs = [
     { id: 'agent', label: 'Agent', icon: <MicrophoneIcon className="w-6 h-6" /> },
     { id: 'chat', label: 'Chat', icon: <ChatIcon className="w-6 h-6" /> },
-    { id: 'context', label: 'Context', icon: <DocumentIcon className="w-6 h-6" /> },
+    { id: 'context', label: 'Knowledge Graph', icon: <KnowledgeGraphIcon className="w-6 h-6" /> },
     { id: 'settings', label: 'Settings', icon: <SettingsIcon className="w-6 h-6" /> },
   ];
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'agent':
-        return <AgentView />;
-      case 'chat':
-        return <ChatView />;
-      case 'context':
-        return <ContextView />;
-      case 'settings':
-        return <SettingsView />;
-      default:
-        return null;
-    }
+  const contentMap: Record<TabId, React.ReactNode> = {
+    agent: <AgentView />,
+    chat: <ChatView />,
+    context: <ContextView />,
+    settings: <SettingsView />,
   };
 
   return (
@@ -39,14 +31,25 @@ const App: React.FC = () => {
       <div className="absolute top-0 left-0 w-full h-full bg-grid-white/[0.05]"></div>
       
       <header className="relative w-full flex-shrink-0 border-b border-gray-800/50 backdrop-blur-sm z-10">
-        <div className="container mx-auto px-4 flex justify-between items-center">
-            <h1 className="text-xl font-bold text-amber-400/80 py-3">Alfie Solomons</h1>
+        <div className="container mx-auto px-4 flex justify-between items-center gap-4">
+            <div className="flex items-center gap-4 py-3">
+              <h1 className="text-2xl font-bold text-amber-300">Alfie</h1>
+              <p className="text-gray-400 italic text-sm hidden md:block">"Intelligence is a very valuable thing, innit, my friend?"</p>
+            </div>
             <Tabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab as (id: string) => void} />
         </div>
       </header>
       
       <main className="flex-grow relative overflow-hidden">
-        {renderContent()}
+        {tabs.map(tab => (
+          <div
+            key={tab.id}
+            className="w-full h-full"
+            style={{ display: activeTab === tab.id ? 'block' : 'none' }}
+          >
+            {contentMap[tab.id as TabId]}
+          </div>
+        ))}
       </main>
 
       <style>{`

@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from '@google/genai';
 import { getApiProvider, getGeminiApiKey, getOpenRouterApiKey } from './apiKey';
 
@@ -42,7 +41,7 @@ export const getGraph = (): KnowledgeGraphData => {
 };
 
 // Function to save the graph to localStorage
-const saveGraph = (graph: KnowledgeGraphData) => {
+const saveGraph = (graph: KnowledgeGraphData, dispatchEvent = true) => {
   try {
     // Sanitize node positions before saving to prevent corruption from invalid physics values (e.g., Infinity)
     graph.nodes.forEach(node => {
@@ -53,7 +52,9 @@ const saveGraph = (graph: KnowledgeGraphData) => {
     });
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(graph));
-    window.dispatchEvent(new Event('storage')); // Notify other components of change
+    if (dispatchEvent) {
+        window.dispatchEvent(new Event('storage')); // Notify other components of change
+    }
   } catch (error) {
     console.error("Error saving knowledge graph to localStorage:", error);
   }
@@ -62,18 +63,30 @@ const saveGraph = (graph: KnowledgeGraphData) => {
 // Saves only the positions of nodes, to persist the visual layout
 export const saveNodePositions = (layoutNodes: Node[]) => {
     const graph = getGraph();
-    const positionMap = new Map(layoutNodes.map(n => [n.id, { x: n.x, y: n.y }]));
+    // Create a map of the new positions and pinned states from the layout nodes
+    const positionMap = new Map(layoutNodes.map(n => [n.id, { x: n.x, y: n.y, fx: n.fx, fy: n.fy }]));
 
     graph.nodes.forEach(node => {
-        const pos = positionMap.get(node.id);
-        if (pos) {
-            // Persist the current visual position.
-            node.x = pos.x;
-            node.y = pos.y;
+        const layoutNode = positionMap.get(node.id);
+        if (layoutNode) {
+            // Update positions from the simulation
+            node.x = layoutNode.x;
+            node.y = layoutNode.y;
+            // Persist the fixed position state
+            if (layoutNode.fx !== undefined) {
+                node.fx = layoutNode.fx;
+            } else {
+                delete node.fx; // Un-pinned
+            }
+            if (layoutNode.fy !== undefined) {
+                node.fy = layoutNode.fy;
+            } else {
+                delete node.fy; // Un-pinned
+            }
         }
     });
 
-    saveGraph(graph);
+    saveGraph(graph, false);
 };
 
 

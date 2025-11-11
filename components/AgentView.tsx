@@ -28,7 +28,8 @@ export const AgentView: React.FC = () => {
   const outputAnalyserRef = useRef<AnalyserNode | null>(null);
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   
-  const animationFrameIdRef = useRef<number>();
+  // FIX: Initialize useRef with null to provide an initial value, correcting a potential error where useRef was called with 0 arguments for a specific type.
+  const animationFrameIdRef = useRef<number | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const outputSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
@@ -42,6 +43,12 @@ export const AgentView: React.FC = () => {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
+
+    // FIX: Stop any playing audio sources before closing the audio context.
+    // The `stop` method is called with an argument for compatibility with older Web Audio API typings.
+    outputSourcesRef.current.forEach(source => source.stop(0));
+    outputSourcesRef.current.clear();
+
     if (inputAudioContextRef.current && inputAudioContextRef.current.state !== 'closed') {
       inputAudioContextRef.current.close();
     }
@@ -54,10 +61,6 @@ export const AgentView: React.FC = () => {
     if (animationFrameIdRef.current) {
       cancelAnimationFrame(animationFrameIdRef.current);
     }
-    // FIX: Added argument to `stop()` to support older Web Audio API typings.
-    // This was called after closing the audio context, which is incorrect. It is now called inside the `interrupted` check.
-    outputSourcesRef.current.forEach(source => source.stop());
-    outputSourcesRef.current.clear();
     setUserAudioLevel(0);
     setAiAudioLevel(0);
   }, []);
@@ -241,8 +244,8 @@ Your ultimate goal is not to be a simple assistant. It is to be an *experience*.
             }
 
             if (message.serverContent?.interrupted) {
-                // FIX: stop() with no arguments is correct for modern APIs. The `when` parameter is optional.
-                outputSourcesRef.current.forEach(source => source.stop());
+                // FIX: Added argument to stop() for compatibility with older Web Audio API typings.
+                outputSourcesRef.current.forEach(source => source.stop(0));
                 outputSourcesRef.current.clear();
                 nextStartTimeRef.current = 0;
             }
