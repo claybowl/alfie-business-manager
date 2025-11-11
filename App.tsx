@@ -4,9 +4,10 @@ import { Tabs } from './components/Tabs';
 import { AgentView } from './components/AgentView';
 import { ChatView } from './components/ChatView';
 import { ContextView } from './components/ContextView';
-import { ChatIcon, DocumentIcon, MicrophoneIcon } from './components/Icons';
+import { SettingsView } from './components/SettingsView';
+import { ChatIcon, DocumentIcon, MicrophoneIcon, SettingsIcon } from './components/Icons';
 
-type TabId = 'agent' | 'chat' | 'context';
+type TabId = 'agent' | 'chat' | 'context' | 'settings';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('agent');
@@ -15,6 +16,7 @@ const App: React.FC = () => {
     { id: 'agent', label: 'Agent', icon: <MicrophoneIcon className="w-6 h-6" /> },
     { id: 'chat', label: 'Chat', icon: <ChatIcon className="w-6 h-6" /> },
     { id: 'context', label: 'Context', icon: <DocumentIcon className="w-6 h-6" /> },
+    { id: 'settings', label: 'Settings', icon: <SettingsIcon className="w-6 h-6" /> },
   ];
 
   const renderContent = () => {
@@ -25,6 +27,8 @@ const App: React.FC = () => {
         return <ChatView />;
       case 'context':
         return <ContextView />;
+      case 'settings':
+        return <SettingsView />;
       default:
         return null;
     }

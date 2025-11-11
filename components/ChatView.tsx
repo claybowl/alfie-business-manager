@@ -1,7 +1,9 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { SendIcon } from './Icons';
-import { GoogleGenAI, Chat, Type, Content } from '@google/genai';
+import { GoogleGenAI, Chat, Content } from '@google/genai';
 import { getGraph, updateGraphFromConversation } from '../utils/knowledgeGraph';
+import { getApiProvider, getGeminiApiKey, getOpenRouterApiKey } from '../utils/apiKey';
 
 type AlfieMood = 'jovial' | 'volatile' | 'philosophical' | 'calculating' | 'world-weary';
 type Message = {
@@ -37,16 +39,17 @@ const systemInstructionTemplate = `You are Alfie Solomons, embodying this person
 *   Business questions -> 'calculating'.
 *   Existential questions -> 'philosophical'.
 *   Personal questions -> 'jovial'.
-
-**Online Capabilities (Google Search):**
-When the user asks for recent information, you will be provided with Google Search results. You MUST use these results. Announce your search with flair, e.g., "Right then, let's see what the papers are saying...". Then, deliver your take on the information concisely and cynically, without the fluff.
-
+__CAPABILITIES__
 **Your Memory (Knowledge Graph):**
 You recall the following key entities and relationships from your conversations. Use this to maintain context and surprise the user with your memory. If the graph is empty, you remember nothing specific.
 __GRAPH_CONTEXT__
 
 **Response Format:**
 You MUST respond with ONLY a valid JSON object that can be parsed by \`JSON.parse()\`. Do not include any text, markdown formatting, or any characters outside of the single, root JSON object. The JSON object must contain two keys: "response" (a string with your in-character, and likely brief, reply) and "mood" (a string which must be one of: 'jovial', 'volatile', 'philosophical', 'calculating', 'world-weary').`;
+
+const GEMINI_CAPABILITIES = `
+**Online Capabilities (Google Search):**
+When the user asks for recent information, you will be provided with Google Search results. You MUST use these results. Announce your search with flair, e.g., "Right then, let's see what the papers are saying...". Then, deliver your take on the information concisely and cynically, without the fluff.`;
 
 export const ChatView: React.FC = () => {
     const [messages, setMessages] = useState<Message[]>([]);
@@ -60,11 +63,86 @@ export const ChatView: React.FC = () => {
     };
 
     useEffect(scrollToBottom, [messages]);
+    
+    const handleGeminiSubmit = async (prompt: string, history: Content[]) => {
+        const apiKey = getGeminiApiKey();
+        if (!apiKey) {
+            alert("Gemini API Key not configured. Please set your Gemini API Key in the Settings tab.");
+            return null;
+        }
+
+        const ai = new GoogleGenAI({ apiKey });
+        const graphData = getGraph();
+        const graphContext = JSON.stringify(graphData.nodes.length > 0 ? graphData : {});
+        const systemInstruction = systemInstructionTemplate
+            .replace('__GRAPH_CONTEXT__', graphContext)
+            .replace('__CAPABILITIES__', GEMINI_CAPABILITIES);
+
+        const chat = ai.chats.create({
+            model: 'gemini-2.5-flash',
+            history: history,
+            config: {
+                systemInstruction: systemInstruction,
+                tools: [{ googleSearch: {} }],
+            },
+         });
+
+        const response = await chat.sendMessage({ message: prompt });
+        const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
+        const citations = groundingMetadata?.groundingChunks
+            ?.map(chunk => chunk.web)
+            .filter((web): web is { uri: string, title: string } => !!web?.uri);
+        
+        return { text: response.text, citations };
+    };
+
+    const handleOpenRouterSubmit = async (prompt: string, history: Content[]) => {
+        const apiKey = getOpenRouterApiKey();
+        if (!apiKey) {
+            alert("OpenRouter API Key not configured. Please set it in the Settings tab.");
+            return null;
+        }
+
+        const graphData = getGraph();
+        const graphContext = JSON.stringify(graphData.nodes.length > 0 ? graphData : {});
+        const systemInstruction = systemInstructionTemplate
+            .replace('__GRAPH_CONTEXT__', graphContext)
+            .replace('__CAPABILITIES__', ''); // No search for OpenRouter
+
+        const messagesForApi = [
+            { role: 'system', content: systemInstruction },
+            ...history.map(c => ({ role: c.role === 'model' ? 'assistant' : 'user', content: c.parts[0].text })),
+            { role: 'user', content: prompt }
+        ];
+
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model: "google/gemini-flash-1.5",
+                messages: messagesForApi,
+                response_format: { type: "json_object" },
+            })
+        });
+
+        if (!response.ok) {
+            console.error("OpenRouter API error:", await response.text());
+            throw new Error("OpenRouter API request failed");
+        }
+        
+        const data = await response.json();
+        return { text: data.choices[0].message.content, citations: [] };
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!input.trim() || isLoading || !process.env.API_KEY) return;
+        const apiProvider = getApiProvider();
 
+        if (!input.trim() || isLoading) return;
+        
         const newUserMessage: Message = { id: Date.now().toString(), role: 'user', content: input };
         const currentMessages = [...messages, newUserMessage];
         setMessages(currentMessages);
@@ -74,37 +152,28 @@ export const ChatView: React.FC = () => {
             parts: [{text: msg.content}]
         }));
 
+        const currentInput = input;
         setInput('');
         setIsLoading(true);
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            let result;
+            if (apiProvider === 'gemini') {
+                result = await handleGeminiSubmit(currentInput, chatHistory);
+            } else {
+                result = await handleOpenRouterSubmit(currentInput, chatHistory);
+            }
             
-            const graphData = getGraph();
-            const graphContext = JSON.stringify(graphData.nodes.length > 0 ? graphData : {});
-            
-            const systemInstruction = systemInstructionTemplate
-                .replace('__GRAPH_CONTEXT__', graphContext);
-
-            const chat = ai.chats.create({
-                model: 'gemini-2.5-flash',
-                history: chatHistory,
-                config: {
-                    systemInstruction: systemInstruction,
-                    tools: [{ googleSearch: {} }],
-                },
-             });
-
-            const response = await chat.sendMessage({ message: input });
-            
-            const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
-            const citations = groundingMetadata?.groundingChunks
-                ?.map(chunk => chunk.web)
-                .filter((web): web is { uri: string, title: string } => !!web?.uri);
+            if (!result) { // API key was missing
+                setIsLoading(false);
+                setMessages(messages); // Revert message add
+                return;
+            }
 
             let assistantResponse: Message;
             try {
-                const cleanResponse = response.text.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+                // OpenRouter with json_object mode returns clean JSON, Gemini might have markdown
+                const cleanResponse = result.text.replace(/^```json\n?/, '').replace(/\n?```$/, '');
                 const parsed = JSON.parse(cleanResponse);
 
                 if (typeof parsed.response === 'string' && typeof parsed.mood === 'string' && moodConfig[parsed.mood as AlfieMood]) {
@@ -113,18 +182,18 @@ export const ChatView: React.FC = () => {
                         id: Date.now().toString() + '-assistant',
                         role: 'assistant',
                         content: parsed.response,
-                        citations: citations,
+                        citations: result.citations,
                     };
                 } else {
                     throw new Error('Invalid JSON structure from model');
                 }
             } catch(e) {
-                console.error("Failed to parse JSON response, using raw text:", e, response.text);
+                console.error("Failed to parse JSON response, using raw text:", e, result.text);
                 assistantResponse = {
                     id: Date.now().toString() + '-assistant',
                     role: 'assistant',
-                    content: response.text,
-                    citations: citations,
+                    content: result.text,
+                    citations: result.citations,
                 };
             }
             setMessages(prev => [...prev, assistantResponse]);
@@ -134,7 +203,7 @@ export const ChatView: React.FC = () => {
             updateGraphFromConversation(updatedConversationForGraph);
 
         } catch (error) {
-            console.error("Gemini API error:", error);
+            console.error("API error:", error);
             const errorResponse: Message = {
                 id: Date.now().toString() + '-error',
                 role: 'assistant',
@@ -145,11 +214,7 @@ export const ChatView: React.FC = () => {
             setIsLoading(false);
         }
     };
-
-    if (!process.env.API_KEY) {
-        return <div className="text-center text-red-500 p-8">API Key not configured. The agent cannot operate.</div>
-    }
-
+    
     return (
         <div className="w-full h-full flex flex-col items-center p-4 pt-8 font-sans">
             <div className="w-full max-w-3xl flex-grow flex flex-col border border-amber-800/20 rounded-lg bg-gradient-to-b from-amber-950/20 to-black/20 backdrop-blur-sm shadow-2xl shadow-black/30">

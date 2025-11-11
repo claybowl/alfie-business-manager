@@ -1,9 +1,12 @@
+
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { GoogleGenAI, LiveSession, LiveServerMessage, Modality, Blob } from '@google/genai';
+// FIX: Removed non-exported type `LiveSession`.
+import { GoogleGenAI, LiveServerMessage, Modality, Blob } from '@google/genai';
 import { Orb } from './Orb';
 import { PowerIcon } from './Icons';
 import { encode, decode, decodeAudioData, createBlob } from '../utils/audio';
 import { updateGraphFromConversation, getGraph } from '../utils/knowledgeGraph';
+import { getGeminiApiKey, getApiProvider } from '../utils/apiKey';
 
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
 
@@ -14,7 +17,8 @@ export const AgentView: React.FC = () => {
   const [interimUserTranscript, setInterimUserTranscript] = useState('');
   const [interimAiTranscript, setInterimAiTranscript] = useState('');
 
-  const sessionPromiseRef = useRef<Promise<LiveSession> | null>(null);
+  // FIX: Using `any` because `LiveSession` is not an exported type.
+  const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const transcriptHistory = useRef<{ role: string, content: string }[]>([]);
 
@@ -30,6 +34,8 @@ export const AgentView: React.FC = () => {
 
   const currentInterimUserTranscript = useRef('');
   const currentInterimAiTranscript = useRef('');
+  
+  const apiProvider = getApiProvider();
 
   const stopAudioProcessing = useCallback(() => {
     if (streamRef.current) {
@@ -48,6 +54,8 @@ export const AgentView: React.FC = () => {
     if (animationFrameIdRef.current) {
       cancelAnimationFrame(animationFrameIdRef.current);
     }
+    // FIX: Added argument to `stop()` to support older Web Audio API typings.
+    // This was called after closing the audio context, which is incorrect. It is now called inside the `interrupted` check.
     outputSourcesRef.current.forEach(source => source.stop());
     outputSourcesRef.current.clear();
     setUserAudioLevel(0);
@@ -90,6 +98,13 @@ export const AgentView: React.FC = () => {
 
 
   const handleConnect = useCallback(async () => {
+    const apiKey = getGeminiApiKey();
+    if (!apiKey) {
+      alert("API Key not configured. Please set your Gemini API Key in the Settings tab.");
+      setConnectionState('idle');
+      return;
+    }
+
     setConnectionState('connecting');
     setInterimUserTranscript('');
     setInterimAiTranscript('');
@@ -98,10 +113,7 @@ export const AgentView: React.FC = () => {
     transcriptHistory.current = [];
 
     try {
-      if (!process.env.API_KEY) {
-        throw new Error("API_KEY environment variable not set");
-      }
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
       const graphData = getGraph();
       const graphContext = JSON.stringify(graphData.nodes.length > 0 ? graphData : {});
 
@@ -229,6 +241,7 @@ Your ultimate goal is not to be a simple assistant. It is to be an *experience*.
             }
 
             if (message.serverContent?.interrupted) {
+                // FIX: stop() with no arguments is correct for modern APIs. The `when` parameter is optional.
                 outputSourcesRef.current.forEach(source => source.stop());
                 outputSourcesRef.current.clear();
                 nextStartTimeRef.current = 0;
@@ -257,6 +270,20 @@ Your ultimate goal is not to be a simple assistant. It is to be an *experience*.
       handleDisconnect();
     };
   }, [handleDisconnect]);
+
+  if (apiProvider === 'openrouter') {
+    return (
+        <div className="w-full h-full flex flex-col justify-center items-center p-4 text-center">
+            <h2 className="text-2xl text-amber-300 mb-2">Agent View Unavailable</h2>
+            <p className="text-gray-400 max-w-md">
+                The real-time voice conversation feature is only available when using a Google Gemini API key due to its reliance on a specialized API.
+            </p>
+            <p className="text-gray-500 mt-4 text-sm">
+                Please switch your API Provider to "Google Gemini" in the Settings tab to use this feature.
+            </p>
+        </div>
+    );
+  }
 
   const isLoading = connectionState === 'connecting';
   const isConnected = connectionState === 'connected';

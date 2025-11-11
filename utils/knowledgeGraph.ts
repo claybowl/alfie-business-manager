@@ -1,4 +1,6 @@
+
 import { GoogleGenAI, Type } from '@google/genai';
+import { getApiProvider, getGeminiApiKey, getOpenRouterApiKey } from './apiKey';
 
 // Define the structure of our graph data
 export interface Node {
@@ -85,72 +87,27 @@ export const clearGraph = () => {
     }
 }
 
-// Function to update the graph based on conversation history
-export const updateGraphFromConversation = async (conversation: { role: string, content: string }[]): Promise<void> => {
-  if (!process.env.API_KEY || conversation.length === 0) {
-    return;
-  }
+const getExtractionPrompt = (currentGraph: KnowledgeGraphData, recentConversation: string) => {
+    return `Analyze the following conversation excerpt and extract key entities and their relationships.
   
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const currentGraph = getGraph();
+    Entities should be nouns (people, places, concepts). Classify them into groups like 'person', 'place', 'organization', 'concept', 'object', or 'event'.
+    Relationships should be concise verbs or short phrases describing how entities are connected.
   
-  const recentConversation = conversation.slice(-4).map(turn => `${turn.role}: ${turn.content}`).join('\n');
-
-  const prompt = `Analyze the following conversation excerpt and extract key entities and their relationships.
+    Existing Knowledge Graph:
+    ${JSON.stringify(currentGraph)}
   
-  Entities should be nouns (people, places, concepts). Classify them into groups like 'person', 'place', 'organization', 'concept', 'object', or 'event'.
-  Relationships should be concise verbs or short phrases describing how entities are connected.
+    Recent Conversation:
+    """
+    ${recentConversation}
+    """
+  
+    Based on the "Recent Conversation" and considering the "Existing Knowledge Graph" to avoid duplicates, identify *new* entities and relationships.
+    Return ONLY a valid JSON object with 'nodes' and 'links' arrays containing ONLY the new items. If no new nodes or links are found, you can omit the corresponding key.
+    `;
+}
 
-  Existing Knowledge Graph:
-  ${JSON.stringify(currentGraph)}
-
-  Recent Conversation:
-  """
-  ${recentConversation}
-  """
-
-  Based on the "Recent Conversation" and considering the "Existing Knowledge Graph" to avoid duplicates, identify *new* entities and relationships.
-  Return ONLY a valid JSON object with 'nodes' and 'links' arrays containing ONLY the new items. If no new nodes or links are found, you can omit the corresponding key.
-  `;
-
-  try {
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    nodes: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                id: { type: Type.STRING, description: "Name of the entity (e.g., 'Tommy Shelby')" },
-                                group: { type: Type.STRING, description: "Classification of the entity (e.g., 'person')" }
-                            },
-                            required: ['id', 'group']
-                        }
-                    },
-                    links: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                source: { type: Type.STRING, description: "Source entity 'id'" },
-                                target: { type: Type.STRING, description: "Target entity 'id'" },
-                                value: { type: Type.STRING, description: "Description of the relationship" }
-                            },
-                            required: ['source', 'target', 'value']
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    const cleanResponse = response.text.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+const processApiResponse = (responseText: string, currentGraph: KnowledgeGraphData) => {
+    const cleanResponse = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '');
     const newGraphData = JSON.parse(cleanResponse) as Partial<KnowledgeGraphData>;
 
     if (newGraphData) {
@@ -189,6 +146,91 @@ export const updateGraphFromConversation = async (conversation: { role: string, 
         if (graphWasUpdated) {
             saveGraph(currentGraph);
         }
+    }
+};
+
+// Function to update the graph based on conversation history
+export const updateGraphFromConversation = async (conversation: { role: string, content: string }[]): Promise<void> => {
+  const apiProvider = getApiProvider();
+  if (conversation.length === 0) return;
+
+  const currentGraph = getGraph();
+  const recentConversation = conversation.slice(-4).map(turn => `${turn.role}: ${turn.content}`).join('\n');
+  const prompt = getExtractionPrompt(currentGraph, recentConversation);
+
+  try {
+    let responseText: string | null = null;
+
+    if (apiProvider === 'gemini') {
+        const apiKey = getGeminiApiKey();
+        if (!apiKey) return;
+        
+        const ai = new GoogleGenAI({ apiKey });
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        nodes: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    id: { type: Type.STRING, description: "Name of the entity (e.g., 'Tommy Shelby')" },
+                                    group: { type: Type.STRING, description: "Classification of the entity (e.g., 'person')" }
+                                },
+                                required: ['id', 'group']
+                            }
+                        },
+                        links: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    source: { type: Type.STRING, description: "Source entity 'id'" },
+                                    target: { type: Type.STRING, description: "Target entity 'id'" },
+                                    value: { type: Type.STRING, description: "Description of the relationship" }
+                                },
+                                required: ['source', 'target', 'value']
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        responseText = response.text;
+
+    } else { // openrouter
+        const apiKey = getOpenRouterApiKey();
+        if (!apiKey) return;
+
+        const apiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model: "google/gemini-flash-1.5",
+                messages: [{ role: "user", content: prompt }],
+                response_format: { type: "json_object" },
+            })
+        });
+
+        if (!apiResponse.ok) {
+            console.error("OpenRouter knowledge graph update error:", await apiResponse.text());
+            return;
+        }
+
+        const data = await apiResponse.json();
+        responseText = data.choices[0].message.content;
+    }
+
+    if (responseText) {
+        processApiResponse(responseText, currentGraph);
     }
 
   } catch (error) {
