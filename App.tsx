@@ -3,11 +3,12 @@ import React, { useState } from 'react';
 import { Tabs } from './components/Tabs';
 import { AgentView } from './components/AgentView';
 import { ChatView } from './components/ChatView';
+import { BriefingView } from './components/BriefingView';
 import { ContextView } from './components/ContextView';
 import { SettingsView } from './components/SettingsView';
-import { ChatIcon, KnowledgeGraphIcon, MicrophoneIcon, SettingsIcon } from './components/Icons';
+import { ChatIcon, KnowledgeGraphIcon, MicrophoneIcon, SettingsIcon, DocumentIcon } from './components/Icons';
 
-type TabId = 'agent' | 'chat' | 'context' | 'settings';
+type TabId = 'agent' | 'chat' | 'briefing' | 'context' | 'settings';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('agent');
@@ -15,6 +16,7 @@ const App: React.FC = () => {
   const tabs = [
     { id: 'agent', label: 'Agent', icon: <MicrophoneIcon className="w-6 h-6" /> },
     { id: 'chat', label: 'Chat', icon: <ChatIcon className="w-6 h-6" /> },
+    { id: 'briefing', label: 'Briefing', icon: <DocumentIcon className="w-6 h-6" /> },
     { id: 'context', label: 'Knowledge Graph', icon: <KnowledgeGraphIcon className="w-6 h-6" /> },
     { id: 'settings', label: 'Settings', icon: <SettingsIcon className="w-6 h-6" /> },
   ];
@@ -22,6 +24,7 @@ const App: React.FC = () => {
   const contentMap: Record<TabId, React.ReactNode> = {
     agent: <AgentView />,
     chat: <ChatView />,
+    briefing: <BriefingView />,
     context: <ContextView />,
     settings: <SettingsView />,
   };

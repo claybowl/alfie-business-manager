@@ -49,3 +49,9 @@ export const KnowledgeGraphIcon: React.FC<React.SVGProps<SVGSVGElement>> = (prop
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 9.75v3" />
     </svg>
 );
+
+export const RefreshIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m21.108-2.31c.487-3.805-3.414-7.408-7.52-7.408-4.925 0-8.85 3.693-8.85 8.235 0 2.924 1.279 5.541 3.282 7.332" />
+    </svg>
+);

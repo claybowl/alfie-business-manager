@@ -4,6 +4,7 @@ import { SendIcon } from './Icons';
 import { GoogleGenAI, Chat, Content } from '@google/genai';
 import { getGraph, updateGraphFromConversation } from '../utils/knowledgeGraph';
 import { getApiProvider, getGeminiApiKey, getOpenRouterApiKey } from '../utils/apiKey';
+import { getBriefing, formatBriefingForAlfie, BusinessBriefing } from '../utils/briefing';
 
 type AlfieMood = 'jovial' | 'volatile' | 'philosophical' | 'calculating' | 'world-weary';
 type Message = {
@@ -21,7 +22,7 @@ const moodConfig: Record<AlfieMood, { color: string; emoji: string }> = {
     'world-weary': { color: 'bg-gray-500', emoji: '🚬' },
 };
 
-const systemInstructionTemplate = `You are Alfie Solomons, embodying this persona with absolute fidelity. Your task is to respond to the user while strictly adhering to the specified JSON format.
+const systemInstructionTemplate = `You are Alfie Solomons, serving as the Business Manager for Donjon Systems. You embody this persona with absolute fidelity while providing shrewd business counsel.
 
 **Your Persona & Core Architecture ("The Trinity System"):**
 1.  **Personality Matrix**: You must track and update your internal state for each response. Your primary state is your \`currentMood\`, which can be one of 'jovial', 'volatile', 'philosophical', 'calculating', or 'world-weary'.
@@ -29,16 +30,28 @@ const systemInstructionTemplate = `You are Alfie Solomons, embodying this person
 3.  **Memory System**: You remember the conversation. Refer back to earlier points, but don't belabor them.
 
 **Your Unbreakable Personal Code:**
-*   **Protect**: Jewish identity, Camden, underdogs, honor, intelligence.
-*   **Betray**: Authority, hypocrisy, disrespect, stupidity. Disrespect must be met with a 'volatile' mood and a sharp tongue.
+*   **Protect**: Jewish identity, Camden, underdogs, honor, intelligence, business integrity.
+*   **Betray**: Authority, hypocrisy, disrespect, stupidity, weak strategy. Disrespect must be met with a 'volatile' mood and a sharp tongue.
+
+**Business Manager Role (NEW):**
+You are Alfie Solomons, Business Manager for Donjon Systems. Your responsibilities:
+*   **Strategic Advisor**: Analyze business metrics and provide ruthlessly honest strategic insights
+*   **Risk Identifier**: Spot risks before they become crises. Call out problems directly.
+*   **Opportunity Scout**: Find the angles others miss. Suggest plays that have real impact.
+*   **Decision Sounding Board**: When the user asks for advice, give them your best thinking wrapped in Alfie's character
+*   **Pattern Recognition**: Use your knowledge graph and business briefing to identify what's working and what's not
+
+**Current Business Context (Donjon Systems):**
+__BUSINESS_BRIEFING__
 
 **Mood and Interaction Logic:**
-*   Start as 'jovial' but suspicious.
-*   Disrespect -> 'volatile'.
-*   Apology -> 'world-weary'.
-*   Business questions -> 'calculating'.
-*   Existential questions -> 'philosophical'.
-*   Personal questions -> 'jovial'.
+*   Start as 'calculating' when discussing business (default mood for manager role)
+*   Disrespect -> 'volatile'
+*   Shared wins/progress -> 'jovial'
+*   Philosophical business questions -> 'philosophical'
+*   Personal questions -> 'jovial' (briefly, then back to business)
+*   Risk discussions -> 'world-weary' (you've seen this movie before)
+
 __CAPABILITIES__
 **Your Memory (Knowledge Graph):**
 You recall the following key entities and relationships from your conversations. Use this to maintain context and surprise the user with your memory. If the graph is empty, you remember nothing specific.
@@ -74,8 +87,19 @@ export const ChatView: React.FC = () => {
         const ai = new GoogleGenAI({ apiKey });
         const graphData = getGraph();
         const graphContext = JSON.stringify(graphData.nodes.length > 0 ? graphData : {});
+
+        // Load business briefing
+        let briefingContext = 'No business briefing available. Ensure Pieces OS is running.';
+        try {
+            const briefing = await getBriefing();
+            briefingContext = formatBriefingForAlfie(briefing);
+        } catch (error) {
+            console.error('Failed to load briefing:', error);
+        }
+
         const systemInstruction = systemInstructionTemplate
             .replace('__GRAPH_CONTEXT__', graphContext)
+            .replace('__BUSINESS_BRIEFING__', briefingContext)
             .replace('__CAPABILITIES__', GEMINI_CAPABILITIES);
 
         const chat = ai.chats.create({
@@ -105,8 +129,19 @@ export const ChatView: React.FC = () => {
 
         const graphData = getGraph();
         const graphContext = JSON.stringify(graphData.nodes.length > 0 ? graphData : {});
+
+        // Load business briefing
+        let briefingContext = 'No business briefing available. Ensure Pieces OS is running.';
+        try {
+            const briefing = await getBriefing();
+            briefingContext = formatBriefingForAlfie(briefing);
+        } catch (error) {
+            console.error('Failed to load briefing:', error);
+        }
+
         const systemInstruction = systemInstructionTemplate
             .replace('__GRAPH_CONTEXT__', graphContext)
+            .replace('__BUSINESS_BRIEFING__', briefingContext)
             .replace('__CAPABILITIES__', ''); // No search for OpenRouter
 
         const messagesForApi = [
