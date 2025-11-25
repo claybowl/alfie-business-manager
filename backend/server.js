@@ -418,6 +418,163 @@ function extractNotionTitle(page) {
 }
 
 // ============================================================================
+// PIECES WORKSTREAM SUMMARIES - MULTI-DAY CONTEXT
+// ============================================================================
+
+// In-memory storage for rolling context (persists across requests but not server restarts)
+// In production, this should be stored in a database or file system
+let workstreamContextStore = {
+    summaries: [], // Array of { date: string, dayLabel: string, summary: string, fetchedAt: string }
+    lastFullFetch: null,
+    maxDays: 5 // Rolling window - keep last 5 days
+};
+
+// Generate date labels for querying
+function getDateLabels(daysBack = 7) {
+    const labels = [];
+    const now = new Date();
+    
+    for (let i = 0; i < daysBack; i++) {
+        const date = new Date(now);
+        date.setDate(date.getDate() - i);
+        
+        const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+        const dateStr = date.toISOString().split('T')[0];
+        const monthDay = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        
+        let label;
+        if (i === 0) label = 'today';
+        else if (i === 1) label = 'yesterday';
+        else label = `${dayName} (${monthDay})`;
+        
+        labels.push({ 
+            dayIndex: i,
+            dateStr, 
+            label,
+            queryLabel: i === 0 ? 'today' : i === 1 ? 'yesterday' : `on ${dayName}, ${monthDay}`
+        });
+    }
+    return labels;
+}
+
+// Fetch summary for a specific day
+async function fetchDaySummary(dayInfo) {
+    if (!mcpClient) return null;
+    
+    try {
+        const question = dayInfo.dayIndex === 0 
+            ? "Give me a detailed summary of what I worked on TODAY. Include: Core Tasks & Projects with specific details, Key Discussions & Decisions made, and Documents & Code files I focused on. Format with clear sections."
+            : `Give me a detailed summary of what I worked on ${dayInfo.queryLabel}. Include: Core Tasks & Projects with specific details, Key Discussions & Decisions made, and Documents & Code files I focused on. Format with clear sections.`;
+        
+        const result = await mcpClient.callTool({
+            name: "ask_pieces_ltm",
+            arguments: {
+                question,
+                chat_llm: "gemini-2.0-flash-exp",
+                connected_client: "Alfie"
+            }
+        });
+        
+        const content = result.content?.[0]?.text || "";
+        
+        // Check if this has actual content
+        if (content && 
+            !content.includes("Failed to extract context") && 
+            !content.includes("No context found") &&
+            !content.includes("I don't have") &&
+            content.length > 50) {
+            return {
+                date: dayInfo.dateStr,
+                dayLabel: dayInfo.label,
+                dayIndex: dayInfo.dayIndex,
+                summary: content,
+                fetchedAt: new Date().toISOString()
+            };
+        }
+        return null;
+    } catch (error) {
+        console.error(`Error fetching summary for ${dayInfo.label}:`, error.message);
+        return null;
+    }
+}
+
+// Clean up old summaries beyond the rolling window
+function cleanupOldSummaries() {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - workstreamContextStore.maxDays);
+    const cutoffStr = cutoffDate.toISOString().split('T')[0];
+    
+    workstreamContextStore.summaries = workstreamContextStore.summaries.filter(
+        s => s.date >= cutoffStr
+    );
+}
+
+// Endpoint to fetch multi-day workstream summaries
+app.get('/api/pieces/workstream-summaries', async (req, res) => {
+    if (!mcpClient) {
+        return res.json({ 
+            total: 0, 
+            summaries: [], 
+            message: 'Pieces MCP not connected' 
+        });
+    }
+
+    const forceRefresh = req.query.refresh === 'true';
+    const daysToFetch = parseInt(req.query.days) || 7;
+    
+    // Check if we have recent data (within last 30 minutes) and not forcing refresh
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+    if (!forceRefresh && workstreamContextStore.lastFullFetch > thirtyMinutesAgo) {
+        cleanupOldSummaries();
+        return res.json({
+            total: workstreamContextStore.summaries.length,
+            summaries: workstreamContextStore.summaries,
+            cached: true,
+            lastFetch: workstreamContextStore.lastFullFetch
+        });
+    }
+
+    try {
+        console.log(`Fetching workstream summaries for ${daysToFetch} days...`);
+        const dateLabels = getDateLabels(daysToFetch);
+        
+        // Fetch summaries in parallel (but limit concurrency to avoid overwhelming the API)
+        const results = await Promise.allSettled(
+            dateLabels.map(dayInfo => fetchDaySummary(dayInfo))
+        );
+        
+        // Process results
+        const newSummaries = results
+            .filter(r => r.status === 'fulfilled' && r.value !== null)
+            .map(r => r.value)
+            .sort((a, b) => a.dayIndex - b.dayIndex); // Sort by most recent first
+        
+        // Merge with existing summaries, preferring newer fetches
+        const existingSummaries = workstreamContextStore.summaries.filter(
+            existing => !newSummaries.some(ns => ns.date === existing.date)
+        );
+        
+        workstreamContextStore.summaries = [...newSummaries, ...existingSummaries]
+            .sort((a, b) => new Date(b.date) - new Date(a.date))
+            .slice(0, workstreamContextStore.maxDays); // Keep only maxDays
+        
+        workstreamContextStore.lastFullFetch = new Date().toISOString();
+        
+        console.log(`Retrieved ${newSummaries.length} summaries, total stored: ${workstreamContextStore.summaries.length}`);
+        
+        res.json({
+            total: workstreamContextStore.summaries.length,
+            summaries: workstreamContextStore.summaries,
+            cached: false,
+            lastFetch: workstreamContextStore.lastFullFetch
+        });
+    } catch (error) {
+        console.error('Error fetching workstream summaries:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================================
 // COMBINED BRIEFING ENDPOINT
 // ============================================================================
 
@@ -431,23 +588,63 @@ app.get('/api/briefing/full', async (req, res) => {
 
     // Fetch all data sources in parallel
     const [piecesResult, linearResult, notionResult] = await Promise.allSettled([
-        // Pieces
+        // Pieces - now fetch multi-day summaries
         (async () => {
-            if (!mcpClient) return { total: 0, activities: [] };
-            const result = await mcpClient.callTool({
-                name: "ask_pieces_ltm",
-                arguments: {
-                    question: "What are the most recent coding activities, snippets, or workstream events I worked on? Please provide a concise summary.",
-                    chat_llm: "gemini-2.0-flash-exp",
-                    connected_client: "Alfie"
-                }
-            });
-            const content = result.content?.[0]?.text || "";
-            const hasContent = content && !content.includes("Failed to extract context");
+            if (!mcpClient) return { total: 0, summaries: [], activities: [] };
+            
+            // First, trigger/get the multi-day summaries
+            const forceRefresh = false;
+            const daysToFetch = 7;
+            
+            // Check cache first
+            const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+            if (!forceRefresh && workstreamContextStore.lastFullFetch > thirtyMinutesAgo && workstreamContextStore.summaries.length > 0) {
+                cleanupOldSummaries();
+                return {
+                    total: workstreamContextStore.summaries.length,
+                    summaries: workstreamContextStore.summaries,
+                    activities: workstreamContextStore.summaries.map(s => ({
+                        name: `Workstream: ${s.dayLabel}`,
+                        summary: s.summary,
+                        date: s.date,
+                        dayLabel: s.dayLabel
+                    })),
+                    message: 'Retrieved from cache'
+                };
+            }
+            
+            // Fetch fresh summaries
+            const dateLabels = getDateLabels(daysToFetch);
+            const fetchResults = await Promise.allSettled(
+                dateLabels.map(dayInfo => fetchDaySummary(dayInfo))
+            );
+            
+            const newSummaries = fetchResults
+                .filter(r => r.status === 'fulfilled' && r.value !== null)
+                .map(r => r.value)
+                .sort((a, b) => a.dayIndex - b.dayIndex);
+            
+            // Update store
+            const existingSummaries = workstreamContextStore.summaries.filter(
+                existing => !newSummaries.some(ns => ns.date === existing.date)
+            );
+            
+            workstreamContextStore.summaries = [...newSummaries, ...existingSummaries]
+                .sort((a, b) => new Date(b.date) - new Date(a.date))
+                .slice(0, workstreamContextStore.maxDays);
+            
+            workstreamContextStore.lastFullFetch = new Date().toISOString();
+            
             return {
-                total: hasContent ? 1 : 0,
-                activities: hasContent ? [{ name: "Pieces Workstream Summary", summary: content }] : [],
-                message: hasContent ? "Successfully retrieved context" : "No recent context found"
+                total: workstreamContextStore.summaries.length,
+                summaries: workstreamContextStore.summaries,
+                activities: workstreamContextStore.summaries.map(s => ({
+                    name: `Workstream: ${s.dayLabel}`,
+                    summary: s.summary,
+                    date: s.date,
+                    dayLabel: s.dayLabel
+                })),
+                message: `Retrieved ${newSummaries.length} new summaries`
             };
         })(),
         // Linear

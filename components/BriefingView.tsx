@@ -204,13 +204,18 @@ const OverviewTab: React.FC<{ dossier: IntelligenceDossier }> = ({ dossier }) =>
         <StatCard label="Activity" value={dossier.events.length} color="purple" />
       </section>
       
-      {/* Data Sources Status */}
-      <section className="flex items-center gap-4 p-3 bg-gray-900/20 rounded-lg border border-gray-800/50">
-        <span className="text-xs text-gray-500 font-mono">DATA SOURCES:</span>
-        <div className="flex items-center gap-3">
+      {/* Data Sources & Context Status */}
+      <section className="p-4 bg-gray-900/20 rounded-lg border border-gray-800/50">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs text-gray-500 font-mono">DATA SOURCES & CONTEXT</span>
+          <span className="text-xs text-amber-400/60 font-mono">
+            Rolling 5-Day Window Active
+          </span>
+        </div>
+        <div className="flex items-center gap-4">
           <span className={`text-xs font-mono flex items-center gap-1 ${dossier.dataSources?.pieces ? 'text-green-400' : 'text-red-400'}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${dossier.dataSources?.pieces ? 'bg-green-400' : 'bg-red-400'}`}></span>
-            Pieces
+            Pieces ({dossier.timeline.length} days)
           </span>
           <span className={`text-xs font-mono flex items-center gap-1 ${dossier.dataSources?.linear ? 'text-green-400' : 'text-red-400'}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${dossier.dataSources?.linear ? 'bg-green-400' : 'bg-red-400'}`}></span>
@@ -221,6 +226,14 @@ const OverviewTab: React.FC<{ dossier: IntelligenceDossier }> = ({ dossier }) =>
             Notion
           </span>
         </div>
+        {dossier.timeline.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-gray-800/50">
+            <p className="text-xs text-gray-500">
+              <span className="text-amber-400/80">Context coverage:</span>{' '}
+              {dossier.timeline[dossier.timeline.length - 1]?.readableTime || 'N/A'} → {dossier.timeline[0]?.readableTime || 'Today'}
+            </p>
+          </div>
+        )}
       </section>
 
       {/* User Notes Preview */}
@@ -240,36 +253,270 @@ const OverviewTab: React.FC<{ dossier: IntelligenceDossier }> = ({ dossier }) =>
 };
 
 const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) => {
+  // Clean content before processing - removes JSON artifacts and metadata
+  const cleanContent = (raw: string): string => {
+    let cleaned = raw;
+    
+    // Remove JSON objects and arrays from content
+    cleaned = cleaned.replace(/\{"[^"]*":[^}]*\}/g, '');
+    cleaned = cleaned.replace(/\[\{[^\]]*\}\]/g, '');
+    cleaned = cleaned.replace(/\{[^{}]*"instructions:"[^}]*\}/g, '');
+    cleaned = cleaned.replace(/\{[^{}]*"created":[^}]*\}/g, '');
+    cleaned = cleaned.replace(/\{[^{}]*"browser_url":[^}]*\}/g, '');
+    cleaned = cleaned.replace(/\{[^{}]*"hints":[^}]*\}/g, '');
+    cleaned = cleaned.replace(/\{[^{}]*"pro_tips":[^}]*\}/g, '');
+    
+    // Remove incomplete fragments
+    cleaned = cleaned.replace(/\}\s*\]\s*,?\s*"?[a-z_]*"?:?\s*\[?\s*\{?/gi, '');
+    cleaned = cleaned.replace(/",?"?[a-z_]*"?:\s*"[^"]*$/gi, '');
+    
+    // Clean JSON punctuation artifacts
+    cleaned = cleaned.replace(/[{}\[\]"]+/g, '');
+    cleaned = cleaned.replace(/:\s*,/g, '');
+    cleaned = cleaned.replace(/,\s*,/g, '');
+    
+    // Remove isolated technical words
+    cleaned = cleaned.replace(/^\s*detected\s*$/gm, '');
+    cleaned = cleaned.replace(/^\s*activity\s*$/gm, '');
+    cleaned = cleaned.replace(/Automated Summary:\s*/gi, '');
+    
+    return cleaned;
+  };
+  
+  // Parse and organize content into sections
+  const parseSummaryIntoSections = (rawContent: string) => {
+    const content = cleanContent(rawContent);
+    const sections: { title: string; items: string[] }[] = [];
+    
+    // Common section patterns - more flexible matching
+    const sectionPatterns = [
+      { pattern: /📋?\s*Core Tasks & Projects\s*\n([\s\S]*?)(?=(?:📋|💬|📁|⚙️|\*\*|###|$))/i, title: 'Core Tasks & Projects' },
+      { pattern: /💬?\s*Key Discussions & Decisions\s*\n([\s\S]*?)(?=(?:📋|💬|📁|⚙️|\*\*|###|$))/i, title: 'Key Discussions & Decisions' },
+      { pattern: /📁?\s*Documents & Code Focused On\s*\n([\s\S]*?)(?=(?:📋|💬|📁|⚙️|\*\*|###|$))/i, title: 'Documents & Code' },
+      { pattern: /⚙️?\s*Technical Implementation\s*\n([\s\S]*?)(?=(?:📋|💬|📁|⚙️|\*\*|###|$))/i, title: 'Technical Implementation' },
+    ];
+    
+    for (const { pattern, title } of sectionPatterns) {
+      const match = content.match(pattern);
+      if (match && match[1]) {
+        const items = match[1]
+          .split('\n')
+          .map(line => line.trim())
+          .filter(line => line.startsWith('-') || line.startsWith('*') || line.startsWith('•'))
+          .map(line => line.replace(/^[-*•]\s*/, '').trim())
+          .filter(line => line.length > 10 && !line.match(/^[{}\[\]",:]+$/)); // Filter out garbage
+        
+        if (items.length > 0) {
+          sections.push({ title, items });
+        }
+      }
+    }
+    
+    return sections;
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Context info banner */}
+      <div className="flex items-center gap-3 p-3 bg-amber-900/10 border border-amber-800/30 rounded-lg">
+        <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
+        <span className="text-xs text-amber-300/80 font-mono">
+          ROLLING 5-DAY CONTEXT WINDOW • {timeline.length} day{timeline.length !== 1 ? 's' : ''} of activity captured
+        </span>
+      </div>
+
       {timeline.length > 0 ? (
-        timeline.map((summary, i) => (
-          <div key={summary.id} className="relative pl-8 pb-8 border-l-2 border-gray-800 last:pb-0">
-            {/* Timeline dot */}
-            <div className="absolute left-[-9px] top-0 w-4 h-4 bg-amber-500/20 border-2 border-amber-500 rounded-full"></div>
-            
-            <div className="bg-gray-900/40 border border-gray-800 rounded-lg p-4 hover:border-amber-500/30 transition-colors">
-              <div className="flex justify-between items-start mb-3">
-                <span className="text-xs font-mono text-amber-400 bg-amber-900/20 px-2 py-1 rounded">
-                  {summary.readableTime}
-                </span>
-                <span className="text-xs text-gray-600 font-mono">{summary.timeRange}</span>
+        timeline.map((summary, i) => {
+          const sections = parseSummaryIntoSections(summary.content);
+          const hasStructuredContent = sections.length > 0;
+          
+          return (
+            <div key={summary.id} className="relative pl-8 pb-6 border-l-2 border-gray-800 last:pb-0">
+              {/* Timeline dot with day indicator */}
+              <div className="absolute left-[-9px] top-0 w-4 h-4 bg-amber-500/20 border-2 border-amber-500 rounded-full flex items-center justify-center">
+                {i === 0 && <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>}
               </div>
-              <div className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
-                {formatSummaryContent(summary.content)}
+              
+              <div className="bg-gray-900/40 border border-gray-800 rounded-lg overflow-hidden hover:border-amber-500/30 transition-colors">
+                {/* Header */}
+                <div className="flex justify-between items-center p-4 bg-gray-900/60 border-b border-gray-800">
+                  <div className="flex items-center gap-3">
+                    <span className={`text-sm font-mono px-3 py-1 rounded ${
+                      i === 0 
+                        ? 'text-amber-300 bg-amber-900/30 border border-amber-700/30' 
+                        : 'text-gray-400 bg-gray-800/50'
+                    }`}>
+                      {summary.readableTime}
+                    </span>
+                    {i === 0 && (
+                      <span className="text-xs text-green-400 bg-green-900/20 px-2 py-0.5 rounded font-mono">
+                        LATEST
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-gray-600 font-mono">{summary.timeRange}</span>
+                </div>
+                
+                {/* Content */}
+                <div className="p-4">
+                  {hasStructuredContent ? (
+                    <div className="space-y-4">
+                      {sections.map((section, sIdx) => (
+                        <div key={sIdx}>
+                          <h4 className="text-xs font-mono text-amber-400/80 mb-2 flex items-center gap-2">
+                            {getSectionIcon(section.title)}
+                            {section.title}
+                          </h4>
+                          <ul className="space-y-1.5">
+                            {section.items.slice(0, 5).map((item, itemIdx) => (
+                              <li key={itemIdx} className="text-sm text-gray-300 flex items-start gap-2">
+                                <span className="text-amber-600 mt-1">•</span>
+                                <span className="leading-relaxed">{item}</span>
+                              </li>
+                            ))}
+                            {section.items.length > 5 && (
+                              <li className="text-xs text-gray-500 italic pl-4">
+                                + {section.items.length - 5} more items...
+                              </li>
+                            )}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <FallbackContentDisplay content={summary.content} cleanContent={cleanContent} />
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))
+          );
+        })
       ) : (
-        <div className="text-center py-12 text-gray-600">
-          <p className="text-lg mb-2">No timeline data available</p>
-          <p className="text-sm">Workstream summaries will appear here as you work.</p>
+        <div className="text-center py-12">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-900/50 border border-gray-800 flex items-center justify-center">
+            <span className="text-2xl">📅</span>
+          </div>
+          <p className="text-lg text-gray-400 mb-2">No timeline data available</p>
+          <p className="text-sm text-gray-600 max-w-md mx-auto">
+            Workstream summaries will appear here as Pieces captures your coding activity. 
+            The rolling 5-day window ensures Alfie always has recent context.
+          </p>
         </div>
       )}
     </div>
   );
 };
+
+// Fallback content display for unstructured summaries
+const FallbackContentDisplay: React.FC<{ 
+  content: string; 
+  cleanContent: (s: string) => string;
+}> = ({ content, cleanContent }) => {
+  const cleaned = cleanContent(content);
+  
+  // Try to extract structured sections from cleaned content
+  const extractedSections: { title: string; items: string[] }[] = [];
+  
+  // Look for emoji-prefixed sections
+  const sectionMatches = cleaned.matchAll(/([📋💬📁⚙️🔧📌]\s*[A-Za-z\s&]+)\n([\s\S]*?)(?=(?:[📋💬📁⚙️🔧📌]|$))/g);
+  for (const match of sectionMatches) {
+    const title = match[1].trim();
+    const items = match[2]
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.startsWith('•') || line.startsWith('-') || line.startsWith('*'))
+      .map(line => line.replace(/^[•\-*]\s*/, ''))
+      .filter(line => line.length > 10);
+    
+    if (items.length > 0) {
+      extractedSections.push({ title, items });
+    }
+  }
+  
+  // If we found sections, display them
+  if (extractedSections.length > 0) {
+    return (
+      <div className="space-y-4">
+        {extractedSections.map((section, sIdx) => (
+          <div key={sIdx}>
+            <h4 className="text-xs font-mono text-amber-400/80 mb-2">
+              {section.title}
+            </h4>
+            <ul className="space-y-1.5">
+              {section.items.slice(0, 5).map((item, itemIdx) => (
+                <li key={itemIdx} className="text-sm text-gray-300 flex items-start gap-2">
+                  <span className="text-amber-600 mt-1">•</span>
+                  <span className="leading-relaxed">{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  
+  // Otherwise, extract bullet points from the cleaned content
+  const bulletPoints = cleaned
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.startsWith('•') || line.startsWith('-') || line.startsWith('*'))
+    .map(line => line.replace(/^[•\-*]\s*/, ''))
+    .filter(line => line.length > 15);
+  
+  if (bulletPoints.length > 0) {
+    return (
+      <ul className="space-y-2">
+        {bulletPoints.slice(0, 8).map((item, idx) => (
+          <li key={idx} className="text-sm text-gray-300 flex items-start gap-2">
+            <span className="text-amber-600 mt-1">•</span>
+            <span className="leading-relaxed">{item}</span>
+          </li>
+        ))}
+        {bulletPoints.length > 8 && (
+          <li className="text-xs text-gray-500 italic pl-4">
+            + {bulletPoints.length - 8} more items...
+          </li>
+        )}
+      </ul>
+    );
+  }
+  
+  // Last resort: display as paragraphs, but clean it thoroughly
+  const paragraphs = cleaned
+    .split('\n\n')
+    .map(p => p.trim())
+    .filter(p => p.length > 20 && !p.match(/^[{}\[\]":,]+$/));
+  
+  if (paragraphs.length > 0) {
+    return (
+      <div className="space-y-3">
+        {paragraphs.slice(0, 3).map((para, idx) => (
+          <p key={idx} className="text-sm text-gray-300 leading-relaxed">
+            {para}
+          </p>
+        ))}
+      </div>
+    );
+  }
+  
+  // Nothing meaningful found
+  return (
+    <p className="text-sm text-gray-500 italic">
+      Activity captured but no detailed summary available.
+    </p>
+  );
+};
+
+// Helper: Get icon for section type
+function getSectionIcon(sectionTitle: string): string {
+  const title = sectionTitle.toLowerCase();
+  if (title.includes('task') || title.includes('project')) return '📋';
+  if (title.includes('discussion') || title.includes('decision')) return '💬';
+  if (title.includes('document') || title.includes('code')) return '📁';
+  if (title.includes('technical') || title.includes('implementation')) return '⚙️';
+  return '📌';
+}
 
 const EventsTab: React.FC<{ events: WorkstreamEvent[] }> = ({ events }) => {
   return (
@@ -555,12 +802,60 @@ const StatCard: React.FC<{ label: string; value: number; color: string }> = ({ l
 // ============================================================================
 
 function formatSummaryContent(content: string): string {
-  // Clean up markdown-like formatting for display
-  return content
-    .replace(/\*\*([^*]+)\*\*/g, '$1') // Remove bold markers
-    .replace(/###\s*/g, '') // Remove headers
-    .replace(/\n{3,}/g, '\n\n') // Reduce excessive newlines
-    .trim();
+  // Comprehensive cleanup of Pieces LTM response artifacts
+  let cleaned = content;
+  
+  // Remove JSON objects that appear in the text (common Pieces artifact)
+  cleaned = cleaned.replace(/\{"[^"]*":[^}]*\}/g, '');
+  cleaned = cleaned.replace(/\{[^{}]*"instructions:"[^}]*\}/g, '');
+  cleaned = cleaned.replace(/\{[^{}]*"created":[^}]*\}/g, '');
+  cleaned = cleaned.replace(/\{[^{}]*"browser_url":[^}]*\}/g, '');
+  cleaned = cleaned.replace(/\{[^{}]*"range":[^}]*\}/g, '');
+  cleaned = cleaned.replace(/\{[^{}]*"schema":[^}]*\}/g, '');
+  cleaned = cleaned.replace(/\{[^{}]*"hints":[^}]*\}/g, '');
+  cleaned = cleaned.replace(/\{[^{}]*"pro_tips":[^}]*\}/g, '');
+  
+  // Remove array notation and nested JSON
+  cleaned = cleaned.replace(/\[\{[^\]]*\}\]/g, '');
+  cleaned = cleaned.replace(/\]\s*,\s*"[^"]*":\s*\[/g, '');
+  
+  // Remove any remaining JSON-like structures with multiple properties
+  cleaned = cleaned.replace(/\{"[^"]*":"[^"]*"[^}]*\}/g, '');
+  
+  // Remove incomplete JSON fragments
+  cleaned = cleaned.replace(/\}\s*\]\s*,?\s*"?[a-z_]*"?:?\s*\[?\s*\{?/gi, '');
+  cleaned = cleaned.replace(/",?"?[a-z_]*"?:\s*"[^"]*$/gi, '');
+  
+  // Clean up markdown formatting
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1'); // Remove bold markers
+  cleaned = cleaned.replace(/###\s*/g, ''); // Remove headers
+  cleaned = cleaned.replace(/##\s*/g, ''); // Remove h2 headers
+  
+  // Clean up stray punctuation from JSON removal
+  cleaned = cleaned.replace(/\}\s*\]/g, '');
+  cleaned = cleaned.replace(/\[\s*\{/g, '');
+  cleaned = cleaned.replace(/"\s*,\s*"/g, '');
+  cleaned = cleaned.replace(/:\s*"/g, '');
+  cleaned = cleaned.replace(/":\s*/g, '');
+  cleaned = cleaned.replace(/^\s*[",\[\]{}]+\s*/gm, '');
+  cleaned = cleaned.replace(/\s*[",\[\]{}]+\s*$/gm, '');
+  
+  // Remove isolated technical artifacts
+  cleaned = cleaned.replace(/detected\s*$/gm, '');
+  cleaned = cleaned.replace(/^\s*activity\s*$/gm, '');
+  cleaned = cleaned.replace(/Automated Summary:\s*/gi, '');
+  
+  // Normalize bullet points
+  cleaned = cleaned.replace(/^\s*[-•*]\s*/gm, '• ');
+  
+  // Clean up excessive whitespace
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+  cleaned = cleaned.replace(/[ \t]{2,}/g, ' ');
+  
+  // Trim each line
+  cleaned = cleaned.split('\n').map(line => line.trim()).join('\n');
+  
+  return cleaned.trim();
 }
 
 function getAppIcon(app: string): string {

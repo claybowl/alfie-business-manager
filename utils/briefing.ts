@@ -117,13 +117,26 @@ const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes (shorter for more real-time
 // DATA FETCHING
 // ============================================================================
 
+interface WorkstreamDaySummary {
+  date: string;
+  dayLabel: string;
+  dayIndex: number;
+  summary: string;
+  fetchedAt: string;
+}
+
 interface RawPiecesResponse {
   total: number;
+  summaries?: WorkstreamDaySummary[];
   activities: Array<{
     name: string;
     summary?: string;
+    date?: string;
+    dayLabel?: string;
   }>;
   message?: string;
+  cached?: boolean;
+  lastFetch?: string;
 }
 
 interface FullBriefingResponse {
@@ -182,109 +195,101 @@ function parsePiecesData(raw: RawPiecesResponse): {
   const decisions: string[] = [];
 
   try {
-    if (raw.activities[0]?.summary) {
-      const parsed = JSON.parse(raw.activities[0].summary);
+    // NEW: Handle multi-day summaries from the enhanced backend
+    if (raw.summaries && Array.isArray(raw.summaries) && raw.summaries.length > 0) {
+      console.log(`Parsing ${raw.summaries.length} day summaries from Pieces`);
+      
+      raw.summaries.forEach((daySummary, index) => {
+        const content = daySummary.summary || '';
+        
+        summaries.push({
+          id: `day-${daySummary.date}-${index}`,
+          created: daySummary.fetchedAt || '',
+          readableTime: daySummary.dayLabel || 'Recently',
+          timeRange: daySummary.date || '',
+          content: content.replace(/\\n/g, '\n').replace(/\\"/g, '"')
+        });
 
-      // Parse summaries
-      if (parsed.summaries && Array.isArray(parsed.summaries)) {
-        parsed.summaries.forEach((s: any, index: number) => {
-          const combinedString = s.combined_string || '';
-          
-          // Extract time range from combined_string
-          const timeRangeMatch = combinedString.match(/Summarized time-range: ([^\n]+)/);
-          const timeRange = timeRangeMatch ? timeRangeMatch[1] : 'Unknown';
+        // Extract decisions and key info from this day's summary
+        extractDecisionsFromContent(content, decisions);
+        
+        // Extract projects mentioned in the summary
+        extractProjectsFromContent(content, activeProjects, daySummary.dayLabel);
+      });
+    }
+    // LEGACY: Also handle old single-activity format for backwards compatibility
+    else if (raw.activities && raw.activities.length > 0) {
+      raw.activities.forEach((activity, actIndex) => {
+        const content = activity.summary || '';
+        const dayLabel = activity.dayLabel || 'Recently';
+        const date = activity.date || new Date().toISOString().split('T')[0];
+        
+        // If summary looks like JSON (old format), try to parse it
+        if (content.startsWith('{') || content.startsWith('[')) {
+          try {
+            const parsed = JSON.parse(content);
+            
+            // Parse old-style summaries
+            if (parsed.summaries && Array.isArray(parsed.summaries)) {
+              parsed.summaries.forEach((s: any, index: number) => {
+                const combinedString = s.combined_string || '';
+                const timeRangeMatch = combinedString.match(/Summarized time-range: ([^\n]+)/);
+                const timeRange = timeRangeMatch ? timeRangeMatch[1] : 'Unknown';
+                const contentStart = combinedString.indexOf('### **');
+                const extractedContent = contentStart > -1 ? combinedString.substring(contentStart) : combinedString;
 
-          // Extract the actual content (after the metadata)
-          const contentStart = combinedString.indexOf('### **');
-          const content = contentStart > -1 ? combinedString.substring(contentStart) : combinedString;
+                summaries.push({
+                  id: s.range?.id || `summary-${index}`,
+                  created: s.created || '',
+                  readableTime: s.range?.from?.readable || 'Recently',
+                  timeRange,
+                  content: extractedContent.replace(/\\n/g, '\n').replace(/\\"/g, '"')
+                });
+                
+                extractDecisionsFromContent(extractedContent, decisions);
+              });
+            }
 
+            // Parse old-style events
+            if (parsed.events && Array.isArray(parsed.events)) {
+              parsed.events.forEach((e: any, index: number) => {
+                const event: WorkstreamEvent = {
+                  id: `event-${index}`,
+                  timestamp: e.created || '',
+                  readableTime: extractReadableTime(e.combined_string) || 'Recently',
+                  app: e.app_title || 'Unknown',
+                  windowTitle: e.window_title || '',
+                  summary: extractEventSummary(e.combined_string),
+                  score: e.score || 0
+                };
+                events.push(event);
+                extractProjectFromEvent(e, activeProjects, event);
+              });
+            }
+          } catch {
+            // Not JSON, treat as raw summary
+            summaries.push({
+              id: `activity-${actIndex}`,
+              created: new Date().toISOString(),
+              readableTime: dayLabel,
+              timeRange: date,
+              content: content
+            });
+            extractDecisionsFromContent(content, decisions);
+          }
+        } else {
+          // Raw text summary (new format from multi-day fetch)
           summaries.push({
-            id: s.range?.id || `summary-${index}`,
-            created: s.created || '',
-            readableTime: s.range?.from?.readable || 'Recently',
-            timeRange,
-            content: content.replace(/\\n/g, '\n').replace(/\\"/g, '"')
+            id: `activity-${actIndex}`,
+            created: new Date().toISOString(),
+            readableTime: dayLabel,
+            timeRange: date,
+            content: content
           });
-
-          // Extract decisions from summaries - try multiple patterns
-          // Pattern 1: **Key Discussions & Decisions**
-          // Pattern 2: ### **Key Discussions & Decisions**
-          // Pattern 3: Key Discussions & Decisions (plain)
-          const decisionPatterns = [
-            /Key Discussions & Decisions\*\*\n([\s\S]*?)(?=###|\*\*[A-Z]|$)/i,
-            /Key Discussions & Decisions\*\*([^#]+)/i,
-            /Key Discussions[^*\n]*\n([\s\S]*?)(?=###|\n\n[A-Z]|$)/i,
-            /Decisions[^*\n]*\n([^#]+)/i
-          ];
-          
-          for (const pattern of decisionPatterns) {
-            const decisionsMatch = content.match(pattern);
-            if (decisionsMatch && decisionsMatch[1]) {
-              const decisionLines = decisionsMatch[1].split('\n').filter((line: string) => {
-                const trimmed = line.trim();
-                return trimmed.startsWith('-') || trimmed.startsWith('*') || trimmed.startsWith('•');
-              });
-              decisionLines.forEach((line: string) => {
-                const cleanLine = line.replace(/^[-*•]\s*/, '').trim();
-                if (cleanLine && cleanLine.length > 10 && !decisions.includes(cleanLine)) {
-                  decisions.push(cleanLine);
-                }
-              });
-              if (decisions.length > 0) break; // Found decisions, stop trying patterns
-            }
-          }
-          
-          // Also extract from "Core Tasks & Projects" as fallback
-          if (decisions.length === 0) {
-            const tasksMatch = content.match(/Core Tasks & Projects\*\*\n([\s\S]*?)(?=###|\*\*[A-Z]|$)/i);
-            if (tasksMatch && tasksMatch[1]) {
-              const taskLines = tasksMatch[1].split('\n').filter((line: string) => {
-                const trimmed = line.trim();
-                return trimmed.startsWith('-') || trimmed.startsWith('*') || trimmed.startsWith('•');
-              });
-              taskLines.slice(0, 5).forEach((line: string) => {
-                const cleanLine = line.replace(/^[-*•]\s*/, '').trim();
-                if (cleanLine && cleanLine.length > 10 && !decisions.includes(cleanLine)) {
-                  decisions.push(cleanLine);
-                }
-              });
-            }
-          }
-        });
-      }
-
-      // Parse events
-      if (parsed.events && Array.isArray(parsed.events)) {
-        parsed.events.forEach((e: any, index: number) => {
-          const event: WorkstreamEvent = {
-            id: `event-${index}`,
-            timestamp: e.created || '',
-            readableTime: extractReadableTime(e.combined_string) || 'Recently',
-            app: e.app_title || 'Unknown',
-            windowTitle: e.window_title || '',
-            summary: extractEventSummary(e.combined_string),
-            score: e.score || 0
-          };
-          events.push(event);
-
-          // Extract project from window title
-          const projectMatch = e.window_title?.match(/([^-]+)\s*-\s*([^-]+)\s*-/);
-          if (projectMatch) {
-            const projectName = projectMatch[2]?.trim() || projectMatch[1]?.trim();
-            if (projectName && !activeProjects.has(projectName)) {
-              activeProjects.set(projectName, {
-                name: projectName,
-                lastAccessed: event.readableTime,
-                app: event.app.replace('.exe', ''),
-                activityCount: 1
-              });
-            } else if (projectName) {
-              const existing = activeProjects.get(projectName)!;
-              existing.activityCount++;
-            }
-          }
-        });
-      }
+          extractDecisionsFromContent(content, decisions);
+          extractProjectsFromContent(content, activeProjects, dayLabel);
+        }
+      });
     }
   } catch (e) {
     console.error('Failed to parse Pieces data:', e);
@@ -294,8 +299,122 @@ function parsePiecesData(raw: RawPiecesResponse): {
     events: events.sort((a, b) => b.score - a.score).slice(0, 20),
     summaries,
     activeProjects: Array.from(activeProjects.values()).sort((a, b) => b.activityCount - a.activityCount),
-    decisions: decisions.slice(0, 10)
+    decisions: decisions.slice(0, 15) // Increased from 10 to capture more context
   };
+}
+
+// Helper: Extract decisions from summary content
+function extractDecisionsFromContent(content: string, decisions: string[]): void {
+  // Try multiple patterns to find decisions/discussions
+  const decisionPatterns = [
+    /Key Discussions & Decisions\*?\*?\n([\s\S]*?)(?=###|\*\*[A-Z]|$)/i,
+    /Key Discussions & Decisions\*?\*?([^#]+)/i,
+    /Key Discussions[^*\n]*\n([\s\S]*?)(?=###|\n\n[A-Z]|$)/i,
+    /Decisions[^*\n]*\n([^#]+)/i,
+    /Important decisions[^*\n]*\n([^#]+)/i
+  ];
+  
+  for (const pattern of decisionPatterns) {
+    const match = content.match(pattern);
+    if (match && match[1]) {
+      const lines = match[1].split('\n').filter((line: string) => {
+        const trimmed = line.trim();
+        return trimmed.startsWith('-') || trimmed.startsWith('*') || trimmed.startsWith('•');
+      });
+      lines.forEach((line: string) => {
+        const cleanLine = line.replace(/^[-*•]\s*/, '').trim();
+        if (cleanLine && cleanLine.length > 10 && !decisions.includes(cleanLine)) {
+          decisions.push(cleanLine);
+        }
+      });
+      if (decisions.length > 0) return;
+    }
+  }
+  
+  // Fallback: extract from "Core Tasks & Projects"
+  const tasksMatch = content.match(/Core Tasks & Projects\*?\*?\n([\s\S]*?)(?=###|\*\*[A-Z]|$)/i);
+  if (tasksMatch && tasksMatch[1]) {
+    const taskLines = tasksMatch[1].split('\n').filter((line: string) => {
+      const trimmed = line.trim();
+      return trimmed.startsWith('-') || trimmed.startsWith('*') || trimmed.startsWith('•');
+    });
+    taskLines.slice(0, 5).forEach((line: string) => {
+      const cleanLine = line.replace(/^[-*•]\s*/, '').trim();
+      if (cleanLine && cleanLine.length > 10 && !decisions.includes(cleanLine)) {
+        decisions.push(cleanLine);
+      }
+    });
+  }
+}
+
+// Helper: Extract projects from summary content
+function extractProjectsFromContent(
+  content: string, 
+  activeProjects: Map<string, ActiveProject>,
+  dayLabel: string
+): void {
+  // Look for project names in various patterns
+  const projectPatterns = [
+    /(?:project|working on|developing|implementing)\s+["']?([A-Z][a-zA-Z0-9\s-]+)["']?/gi,
+    /\*\*([A-Z][a-zA-Z0-9\s-]+)\*\*\s*(?:project|app|application|system)/gi,
+    /([A-Z][a-zA-Z0-9-]+(?:\s+[A-Z][a-zA-Z0-9-]+)?)\s+(?:backend|frontend|server|client|API)/gi
+  ];
+  
+  const foundProjects = new Set<string>();
+  
+  for (const pattern of projectPatterns) {
+    let match;
+    while ((match = pattern.exec(content)) !== null) {
+      const projectName = match[1]?.trim();
+      if (projectName && projectName.length > 2 && projectName.length < 50) {
+        foundProjects.add(projectName);
+      }
+    }
+  }
+  
+  // Also look for specific code/repo references
+  const repoPattern = /(?:repository|repo|codebase)\s*[:\-]?\s*["']?([a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)?)/gi;
+  let repoMatch;
+  while ((repoMatch = repoPattern.exec(content)) !== null) {
+    if (repoMatch[1]) foundProjects.add(repoMatch[1]);
+  }
+  
+  foundProjects.forEach(projectName => {
+    if (!activeProjects.has(projectName)) {
+      activeProjects.set(projectName, {
+        name: projectName,
+        lastAccessed: dayLabel,
+        app: 'Pieces Context',
+        activityCount: 1
+      });
+    } else {
+      const existing = activeProjects.get(projectName)!;
+      existing.activityCount++;
+    }
+  });
+}
+
+// Helper: Extract project from event (legacy support)
+function extractProjectFromEvent(
+  e: any, 
+  activeProjects: Map<string, ActiveProject>,
+  event: WorkstreamEvent
+): void {
+  const projectMatch = e.window_title?.match(/([^-]+)\s*-\s*([^-]+)\s*-/);
+  if (projectMatch) {
+    const projectName = projectMatch[2]?.trim() || projectMatch[1]?.trim();
+    if (projectName && !activeProjects.has(projectName)) {
+      activeProjects.set(projectName, {
+        name: projectName,
+        lastAccessed: event.readableTime,
+        app: event.app.replace('.exe', ''),
+        activityCount: 1
+      });
+    } else if (projectName) {
+      const existing = activeProjects.get(projectName)!;
+      existing.activityCount++;
+    }
+  }
 }
 
 function extractReadableTime(combinedString: string): string {
@@ -416,7 +535,9 @@ function buildRawContext(
   linearIssues: LinearIssueData[] = [],
   notionPages: NotionPage[] = []
 ): string {
-  let context = '## INTELLIGENCE DOSSIER FOR ALFIE\n\n';
+  let context = '## INTELLIGENCE DOSSIER FOR ALFIE\n';
+  context += `Generated: ${new Date().toLocaleString()}\n`;
+  context += `Rolling Context Window: Last ${summaries.length} days of work activity\n\n`;
 
   // Linear Issues Section
   if (linearIssues.length > 0) {
@@ -440,20 +561,32 @@ function buildRawContext(
     context += '\n';
   }
 
-  context += '### RECENT WORKSTREAM SUMMARIES (from Pieces LTM)\n';
+  // Multi-day Workstream Summaries - the core context
+  context += '### WORKSTREAM SUMMARIES (Rolling 5-Day Context from Pieces)\n';
+  context += 'These summaries capture your coding activity, decisions, and focus areas:\n\n';
+  
   summaries.forEach((s, i) => {
-    context += `\n**Summary ${i + 1}** (${s.readableTime}):\n${s.content}\n`;
+    context += `---\n`;
+    context += `**${s.readableTime}** ${s.timeRange ? `(${s.timeRange})` : ''}\n`;
+    context += `${s.content}\n\n`;
   });
 
-  context += '\n### KEY DECISIONS MADE\n';
-  decisions.forEach((d, i) => {
-    context += `${i + 1}. ${d}\n`;
-  });
+  // Key Decisions extracted across all days
+  if (decisions.length > 0) {
+    context += '### KEY DECISIONS & DISCUSSIONS (Extracted from workstream)\n';
+    decisions.forEach((d, i) => {
+      context += `${i + 1}. ${d}\n`;
+    });
+    context += '\n';
+  }
 
-  context += '\n### RECENT ACTIVITY (Top 10 by relevance)\n';
-  events.slice(0, 10).forEach((e, i) => {
-    context += `${i + 1}. [${e.app}] ${e.windowTitle} - ${e.readableTime}\n`;
-  });
+  // Recent Activity events (if available)
+  if (events.length > 0) {
+    context += '### RECENT ACTIVITY (Top 10 by relevance)\n';
+    events.slice(0, 10).forEach((e, i) => {
+      context += `${i + 1}. [${e.app}] ${e.windowTitle} - ${e.readableTime}\n`;
+    });
+  }
 
   return context;
 }
