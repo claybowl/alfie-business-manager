@@ -11,9 +11,15 @@ const app = express();
 const PORT = 3001;
 const PIECES_SSE_URL = 'http://localhost:39300/model_context_protocol/2024-11-05/sse';
 
-// API Keys
-const LINEAR_API_KEY = 'REMOVED';
-const NOTION_API_KEY = 'REMOVED';
+// API Keys (loaded from environment variables)
+const LINEAR_API_KEY = process.env.LINEAR_API_KEY;
+const NOTION_API_KEY = process.env.NOTION_API_KEY;
+
+if (!LINEAR_API_KEY || !NOTION_API_KEY) {
+  console.error('ERROR: Missing required API keys in environment variables');
+  console.error('Set LINEAR_API_KEY and NOTION_API_KEY before starting the server');
+  process.exit(1);
+}
 
 app.use(cors());
 app.use(express.json());
