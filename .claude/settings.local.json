@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:docs.pieces.app)",
+      "Skill(mcp-builder)",
+      "WebFetch(domain:localhost)",
+      "Bash(npm install:*)",
+      "Bash(timeout 5s npm start:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
