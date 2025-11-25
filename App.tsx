@@ -36,7 +36,10 @@ const App: React.FC = () => {
       <header className="relative w-full flex-shrink-0 border-b border-gray-800/50 backdrop-blur-sm z-10">
         <div className="container mx-auto px-4 flex justify-between items-center gap-4">
             <div className="flex items-center gap-4 py-3">
-              <h1 className="text-2xl font-bold text-amber-300">Alfie</h1>
+              <div className="flex flex-col leading-tight">
+                <h1 className="text-2xl font-bold text-amber-300">Alfie</h1>
+                <p className="text-xs text-white/80 tracking-wide uppercase">Business Manager</p>
+              </div>
               <p className="text-gray-400 italic text-sm hidden md:block">"Intelligence is a very valuable thing, innit, my friend?"</p>
             </div>
             <Tabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab as (id: string) => void} />
