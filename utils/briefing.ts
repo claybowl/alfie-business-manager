@@ -92,6 +92,8 @@ export interface NotionPage {
   title: string;
   lastEdited: string;
   type: string;
+  content?: string; // Actual page content from Notion blocks
+  url?: string;
 }
 
 export interface LinearIssueData {
@@ -148,6 +150,8 @@ interface FullBriefingResponse {
   notion: {
     total: number;
     pages: NotionPage[];
+    pagesWithContent?: number; // Number of pages that have actual content fetched
+    contentFetched?: boolean;  // Whether content was retrieved (vs just metadata)
   } | null;
   errors: Array<{ source: string; error: string }>;
 }
@@ -353,30 +357,59 @@ function extractProjectsFromContent(
   activeProjects: Map<string, ActiveProject>,
   dayLabel: string
 ): void {
+  // Stopwords to filter out common non-project words
+  const stopwords = new Set([
+    'the', 'and', 'for', 'with', 'from', 'this', 'that', 'into', 'new', 'old',
+    'some', 'any', 'all', 'most', 'more', 'less', 'each', 'every', 'both',
+    'other', 'another', 'such', 'only', 'just', 'also', 'very', 'even',
+    'working', 'developing', 'implementing', 'project', 'app', 'application',
+    'system', 'backend', 'frontend', 'server', 'client', 'api', 'code',
+    'sorting', 'improving', 'fixing', 'updating', 'adding', 'removing',
+    'parsing', 'formatting', 'management', 'template', 'templates'
+  ]);
+  
   // Look for project names in various patterns
+  // Pattern 1: "project/working on/developing/implementing ProjectName" - single word only
   const projectPatterns = [
-    /(?:project|working on|developing|implementing)\s+["']?([A-Z][a-zA-Z0-9\s-]+)["']?/gi,
-    /\*\*([A-Z][a-zA-Z0-9\s-]+)\*\*\s*(?:project|app|application|system)/gi,
-    /([A-Z][a-zA-Z0-9-]+(?:\s+[A-Z][a-zA-Z0-9-]+)?)\s+(?:backend|frontend|server|client|API)/gi
+    /(?:project|working on|developing|implementing)\s+["']?([A-Z][a-zA-Z0-9-]+)["']?/g,
+    /\*\*([A-Z][a-zA-Z0-9-]+)\*\*\s*(?:project|app|application|system)/gi,
+    /([A-Z][a-zA-Z0-9-]+)\s+(?:backend|frontend|server|client|API)/g
   ];
   
   const foundProjects = new Set<string>();
   
   for (const pattern of projectPatterns) {
     let match;
+    // Reset lastIndex for each pattern (important for /g flag)
+    pattern.lastIndex = 0;
     while ((match = pattern.exec(content)) !== null) {
       const projectName = match[1]?.trim();
-      if (projectName && projectName.length > 2 && projectName.length < 50) {
+      // Filter: must start with uppercase, be 3-40 chars, not a stopword
+      if (projectName && 
+          projectName.length >= 3 && 
+          projectName.length <= 40 &&
+          /^[A-Z]/.test(projectName) &&
+          !stopwords.has(projectName.toLowerCase())) {
         foundProjects.add(projectName);
       }
     }
   }
   
-  // Also look for specific code/repo references
+  // Also look for specific code/repo references (these are more reliable)
   const repoPattern = /(?:repository|repo|codebase)\s*[:\-]?\s*["']?([a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)?)/gi;
   let repoMatch;
   while ((repoMatch = repoPattern.exec(content)) !== null) {
-    if (repoMatch[1]) foundProjects.add(repoMatch[1]);
+    const repoName = repoMatch[1]?.trim();
+    if (repoName && repoName.length >= 3 && !stopwords.has(repoName.toLowerCase())) {
+      foundProjects.add(repoName);
+    }
+  }
+  
+  // Look for Alfie-specific patterns
+  const alfiePattern = /Alfie[-\s]?(?:Business[-\s]?Manager|Agent|[A-Z][a-zA-Z0-9-]*)/gi;
+  let alfieMatch;
+  while ((alfieMatch = alfiePattern.exec(content)) !== null) {
+    foundProjects.add(alfieMatch[0].replace(/\s+/g, '-'));
   }
   
   foundProjects.forEach(projectName => {
@@ -551,14 +584,33 @@ function buildRawContext(
     context += '\n';
   }
 
-  // Notion Pages Section
+  // Notion Pages Section - NOW WITH FULL CONTENT!
   if (notionPages.length > 0) {
-    context += '### NOTION PAGES (Recent Documents)\n';
-    notionPages.forEach((page, i) => {
+    const pagesWithContent = notionPages.filter(p => p.content && p.content.trim().length > 0);
+    const pagesWithoutContent = notionPages.filter(p => !p.content || p.content.trim().length === 0);
+    
+    context += '### NOTION DOCUMENTS (Full Content Retrieved)\n';
+    context += `Total pages: ${notionPages.length} | Pages with content: ${pagesWithContent.length}\n\n`;
+    
+    // Include full content for pages that have it
+    pagesWithContent.forEach((page, i) => {
       const editedDate = new Date(page.lastEdited).toLocaleDateString();
-      context += `${i + 1}. ${page.title} (${page.type}) - Last edited: ${editedDate}\n`;
+      context += `---\n`;
+      context += `#### ${i + 1}. ${page.title}\n`;
+      context += `Type: ${page.type} | Last edited: ${editedDate}\n\n`;
+      context += `${page.content}\n\n`;
     });
-    context += '\n';
+    
+    // List pages without content (databases, etc.)
+    if (pagesWithoutContent.length > 0) {
+      context += `---\n`;
+      context += `#### Other Notion Items (metadata only):\n`;
+      pagesWithoutContent.forEach((page, i) => {
+        const editedDate = new Date(page.lastEdited).toLocaleDateString();
+        context += `- ${page.title} (${page.type}) - ${editedDate}\n`;
+      });
+      context += '\n';
+    }
   }
 
   // Multi-day Workstream Summaries - the core context

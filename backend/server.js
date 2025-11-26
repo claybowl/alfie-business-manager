@@ -418,6 +418,214 @@ function extractNotionTitle(page) {
 }
 
 // ============================================================================
+// NOTION CONTENT RETRIEVAL - Fetch actual page content
+// ============================================================================
+
+// Convert a single Notion block to plain text
+function blockToText(block) {
+    const type = block.type;
+    const content = block[type];
+    
+    if (!content) return '';
+    
+    // Extract rich text from various block types
+    let text = '';
+    
+    switch (type) {
+        case 'paragraph':
+        case 'heading_1':
+        case 'heading_2':
+        case 'heading_3':
+        case 'bulleted_list_item':
+        case 'numbered_list_item':
+        case 'quote':
+        case 'callout':
+        case 'toggle':
+            text = content.rich_text?.map(rt => rt.plain_text).join('') || '';
+            // Add appropriate prefixes for structure
+            if (type === 'heading_1') text = `# ${text}`;
+            else if (type === 'heading_2') text = `## ${text}`;
+            else if (type === 'heading_3') text = `### ${text}`;
+            else if (type === 'bulleted_list_item') text = `• ${text}`;
+            else if (type === 'numbered_list_item') text = `- ${text}`;
+            else if (type === 'quote') text = `> ${text}`;
+            break;
+            
+        case 'to_do':
+            const checked = content.checked ? '☑' : '☐';
+            text = `${checked} ${content.rich_text?.map(rt => rt.plain_text).join('') || ''}`;
+            break;
+            
+        case 'code':
+            const code = content.rich_text?.map(rt => rt.plain_text).join('') || '';
+            const lang = content.language || '';
+            text = `\`\`\`${lang}\n${code}\n\`\`\``;
+            break;
+            
+        case 'divider':
+            text = '---';
+            break;
+            
+        case 'table_row':
+            text = content.cells?.map(cell => 
+                cell.map(rt => rt.plain_text).join('')
+            ).join(' | ') || '';
+            break;
+            
+        case 'child_page':
+            text = `[Subpage: ${content.title || 'Untitled'}]`;
+            break;
+            
+        case 'child_database':
+            text = `[Database: ${content.title || 'Untitled'}]`;
+            break;
+            
+        case 'bookmark':
+        case 'embed':
+        case 'link_preview':
+            text = `[Link: ${content.url || ''}]`;
+            break;
+            
+        case 'image':
+        case 'video':
+        case 'file':
+        case 'pdf':
+            const caption = content.caption?.map(rt => rt.plain_text).join('') || '';
+            text = `[${type}: ${caption || 'No caption'}]`;
+            break;
+            
+        default:
+            // For unknown types, try to extract any rich_text
+            if (content.rich_text) {
+                text = content.rich_text.map(rt => rt.plain_text).join('');
+            }
+    }
+    
+    return text;
+}
+
+// Fetch all blocks from a Notion page (handles pagination)
+async function fetchNotionPageBlocks(pageId, maxBlocks = 100) {
+    const blocks = [];
+    let cursor = undefined;
+    
+    while (blocks.length < maxBlocks) {
+        const url = new URL(`https://api.notion.com/v1/blocks/${pageId}/children`);
+        if (cursor) url.searchParams.set('start_cursor', cursor);
+        url.searchParams.set('page_size', '100');
+        
+        const response = await fetch(url.toString(), {
+            headers: {
+                'Authorization': `Bearer ${NOTION_API_KEY}`,
+                'Notion-Version': '2022-06-28'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.object === 'error') {
+            console.error(`Error fetching blocks for page ${pageId}:`, data.message);
+            break;
+        }
+        
+        blocks.push(...(data.results || []));
+        
+        if (!data.has_more || !data.next_cursor) break;
+        cursor = data.next_cursor;
+    }
+    
+    return blocks.slice(0, maxBlocks);
+}
+
+// Convert all blocks to readable text content
+function blocksToText(blocks) {
+    return blocks
+        .map(block => blockToText(block))
+        .filter(text => text.trim().length > 0)
+        .join('\n');
+}
+
+// Fetch page content with a character limit
+async function fetchNotionPageContent(pageId, maxChars = 4000) {
+    try {
+        const blocks = await fetchNotionPageBlocks(pageId, 50); // Limit blocks per page
+        const content = blocksToText(blocks);
+        
+        // Truncate if too long
+        if (content.length > maxChars) {
+            return content.substring(0, maxChars) + '\n... [content truncated]';
+        }
+        
+        return content;
+    } catch (error) {
+        console.error(`Error fetching content for page ${pageId}:`, error.message);
+        return null;
+    }
+}
+
+// New endpoint: Get a single page's full content
+app.get('/api/notion/page/:id/content', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const maxChars = parseInt(req.query.maxChars) || 8000;
+        
+        // First get the page metadata
+        const pageResponse = await fetch(`https://api.notion.com/v1/pages/${id}`, {
+            headers: {
+                'Authorization': `Bearer ${NOTION_API_KEY}`,
+                'Notion-Version': '2022-06-28'
+            }
+        });
+        
+        const pageData = await pageResponse.json();
+        
+        if (pageData.object === 'error') {
+            return res.status(400).json({ error: pageData.message });
+        }
+        
+        // Fetch the content
+        const content = await fetchNotionPageContent(id, maxChars);
+        
+        res.json({
+            id: pageData.id,
+            title: extractNotionTitle(pageData),
+            lastEdited: pageData.last_edited_time,
+            url: pageData.url,
+            content: content || 'No content available'
+        });
+    } catch (error) {
+        console.error('Error fetching Notion page content:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Fetch content for multiple pages in parallel (with rate limiting)
+async function fetchMultiplePagesContent(pages, maxPagesWithContent = 15, maxCharsPerPage = 3000) {
+    // Only fetch content for pages (not databases) - prioritize most recently edited
+    const pagesToFetch = pages
+        .filter(p => p.object === 'page')
+        .slice(0, maxPagesWithContent);
+    
+    const results = await Promise.allSettled(
+        pagesToFetch.map(async (page) => {
+            const content = await fetchNotionPageContent(page.id, maxCharsPerPage);
+            return {
+                id: page.id,
+                title: extractNotionTitle(page),
+                lastEdited: page.last_edited_time,
+                type: page.object,
+                url: page.url,
+                content: content || ''
+            };
+        })
+    );
+    
+    return results
+        .filter(r => r.status === 'fulfilled')
+        .map(r => r.value);
+}
+
+// ============================================================================
 // PIECES WORKSTREAM SUMMARIES - MULTI-DAY CONTEXT
 // ============================================================================
 
@@ -689,8 +897,9 @@ app.get('/api/briefing/full', async (req, res) => {
                 }))
             };
         })(),
-        // Notion
+        // Notion - Now fetches actual page CONTENT, not just titles!
         (async () => {
+            // Step 1: Search for recent pages (increased limit)
             const response = await fetch('https://api.notion.com/v1/search', {
                 method: 'POST',
                 headers: {
@@ -699,19 +908,39 @@ app.get('/api/briefing/full', async (req, res) => {
                     'Notion-Version': '2022-06-28'
                 },
                 body: JSON.stringify({
-                    page_size: 10,
+                    page_size: 25, // Increased from 10
                     sort: { direction: 'descending', timestamp: 'last_edited_time' }
                 })
             });
             const data = await response.json();
+            
+            if (data.object === 'error') {
+                console.error('Notion search error:', data.message);
+                return { total: 0, pages: [] };
+            }
+            
+            const rawPages = data.results || [];
+            
+            // Step 2: Fetch actual content for pages (not databases)
+            // Limit to 15 pages with content to avoid rate limits
+            const pagesWithContent = await fetchMultiplePagesContent(rawPages, 15, 3000);
+            
+            // Step 3: Include databases as metadata only
+            const databases = rawPages
+                .filter(p => p.object === 'database')
+                .map(db => ({
+                    id: db.id,
+                    title: extractNotionTitle(db),
+                    lastEdited: db.last_edited_time,
+                    type: 'database',
+                    content: '' // Databases don't have block content
+                }));
+            
             return {
-                total: data.results?.length || 0,
-                pages: data.results?.map(p => ({
-                    id: p.id,
-                    title: extractNotionTitle(p),
-                    lastEdited: p.last_edited_time,
-                    type: p.object
-                })) || []
+                total: pagesWithContent.length + databases.length,
+                pages: [...pagesWithContent, ...databases],
+                pagesWithContent: pagesWithContent.length,
+                contentFetched: true
             };
         })()
     ]);

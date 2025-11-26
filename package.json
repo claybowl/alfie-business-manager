@@ -10,11 +10,13 @@
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
+    "d3-force": "^3.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-force-graph-2d": "latest"
   },
   "devDependencies": {
+    "@types/d3-force": "^3.0.10",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",
