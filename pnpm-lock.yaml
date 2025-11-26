@@ -11,6 +11,9 @@ importers:
       '@google/genai':
         specifier: ^1.29.0
         version: 1.30.0
+      d3-force:
+        specifier: ^3.0.0
+        version: 3.0.0
       react:
         specifier: ^19.2.0
         version: 19.2.0
@@ -21,6 +24,9 @@ importers:
         specifier: latest
         version: 1.29.0(react@19.2.0)
     devDependencies:
+      '@types/d3-force':
+        specifier: ^3.0.10
+        version: 3.0.10
       '@types/node':
         specifier: ^22.14.0
         version: 22.19.1
@@ -440,6 +446,9 @@ packages:
   '@types/babel__traverse@7.28.0':
     resolution: {integrity: sha512-8PvcXf70gTDZBgt9ptxJ8elBeBjcLOAcOtoO/mPJjtji1+CdGbHgm77om1GrsPxsiE+uXIpNSK64UYaIwQXd4Q==}
 
+  '@types/d3-force@3.0.10':
+    resolution: {integrity: sha512-ZYeSaCF3p73RdOKcjj+swRlZfnYpK1EbaDiYICEEp5Q6sUiqFaFQ9qgoshp5CzIyyb/yD09kD9o2zEltCexlgw==}
+
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
@@ -549,6 +558,10 @@ packages:
 
   d3-force-3d@3.0.6:
     resolution: {integrity: sha512-4tsKHUPLOVkyfEffZo1v6sFHvGFwAIIjt/W8IThbp08DYAsXZck+2pSHEG5W1+gQgEvFLdZkYvmJAbRM2EzMnA==}
+    engines: {node: '>=12'}
+
+  d3-force@3.0.0:
+    resolution: {integrity: sha512-zxV/SsA+U4yte8051P4ECydjD/S+qeYtnaIyAs9tgHCqfguma/aAQDjo85A9Z6EKhBirHRJHXIgJUlffT4wdLg==}
     engines: {node: '>=12'}
 
   d3-format@3.1.0:
@@ -1322,6 +1335,8 @@ snapshots:
     dependencies:
       '@babel/types': 7.28.5
 
+  '@types/d3-force@3.0.10': {}
+
   '@types/estree@1.0.8': {}
 
   '@types/node@22.19.1':
@@ -1420,6 +1435,12 @@ snapshots:
       d3-binarytree: 1.0.2
       d3-dispatch: 3.0.1
       d3-octree: 1.1.0
+      d3-quadtree: 3.0.1
+      d3-timer: 3.0.1
+
+  d3-force@3.0.0:
+    dependencies:
+      d3-dispatch: 3.0.1
       d3-quadtree: 3.0.1
       d3-timer: 3.0.1
 
