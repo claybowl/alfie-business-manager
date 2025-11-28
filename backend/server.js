@@ -665,45 +665,176 @@ function getDateLabels(daysBack = 7) {
     return labels;
 }
 
-// Fetch summary for a specific day
+// Parse Pieces LTM JSON response to extract rich structured data
+function parsePiecesLTMResponse(response) {
+    try {
+        const content = response.content?.[0]?.text || "";
+        if (!content) return null;
+        
+        // Try to parse as JSON first
+        if (content.startsWith('{') || content.startsWith('[')) {
+            const data = JSON.parse(content);
+            
+            // Extract rich details from summaries and events
+            const enrichedData = [];
+            
+            // Process summaries array
+            if (data.summaries && Array.isArray(data.summaries)) {
+                data.summaries.forEach(summary => {
+                    if (summary.combined_string) {
+                        enrichedData.push({
+                            type: 'summary',
+                            created: summary.created,
+                            app: summary.app_title,
+                            window: summary.window_title,
+                            url: summary.browser_url,
+                            score: summary.score,
+                            content: summary.combined_string // This has the rich detail!
+                        });
+                    }
+                });
+            }
+            
+            // Process events array
+            if (data.events && Array.isArray(data.events)) {
+                data.events.forEach(event => {
+                    if (event.combined_string) {
+                        enrichedData.push({
+                            type: 'event',
+                            created: event.created,
+                            app: event.app_title,
+                            window: event.window_title,
+                            url: event.browser_url,
+                            score: event.score,
+                            content: event.combined_string // This has the rich detail!
+                        });
+                    }
+                });
+            }
+            
+            // Sort by score (highest first) and return
+            return enrichedData.length > 0 
+                ? enrichedData.sort((a, b) => (b.score || 0) - (a.score || 0))
+                : [{ text: content }];
+        }
+        
+        // Fallback: return as text
+        return [{ text: content }];
+    } catch (e) {
+        // If parsing fails, return the raw text
+        const content = response.content?.[0]?.text || "";
+        return content ? [{ text: content }] : null;
+    }
+}
+
+// Fetch comprehensive workstream data for a specific day - RAW DATA EXTRACTION
 async function fetchDaySummary(dayInfo) {
     if (!mcpClient) return null;
     
     try {
-        const question = dayInfo.dayIndex === 0 
-            ? "Give me a detailed summary of what I worked on TODAY. Include: Core Tasks & Projects with specific details, Key Discussions & Decisions made, and Documents & Code files I focused on. Format with clear sections."
-            : `Give me a detailed summary of what I worked on ${dayInfo.queryLabel}. Include: Core Tasks & Projects with specific details, Key Discussions & Decisions made, and Documents & Code files I focused on. Format with clear sections.`;
+        const timeframe = dayInfo.dayIndex === 0 ? "today" : dayInfo.queryLabel;
         
+        // Request RAW activity data in JSON format - this is the key!
         const result = await mcpClient.callTool({
             name: "ask_pieces_ltm",
             arguments: {
-                question,
+                question: `Give me the complete raw activity log for ${timeframe} in JSON format. Include all summaries, events, applications, files opened, code edits, conversations, and timestamps. Return the full JSON structure with all details.`,
+                topics: ["development", "coding", "files", "projects", "work"],
+                application_sources: ["Cursor", "Cursor.exe"],
                 chat_llm: "gemini-2.0-flash-exp",
                 connected_client: "Alfie"
             }
         });
         
-        const content = result.content?.[0]?.text || "";
+        // Parse the raw JSON response
+        const rawData = parsePiecesLTMResponse(result);
         
-        // Check if this has actual content
-        if (content && 
-            !content.includes("Failed to extract context") && 
-            !content.includes("No context found") &&
-            !content.includes("I don't have") &&
-            content.length > 50) {
-            return {
-                date: dayInfo.dateStr,
-                dayLabel: dayInfo.label,
-                dayIndex: dayInfo.dayIndex,
-                summary: content,
-                fetchedAt: new Date().toISOString()
-            };
+        if (!rawData || (Array.isArray(rawData) && rawData.length === 0)) {
+            console.log(`No significant activity for ${dayInfo.label}`);
+            return null;
         }
-        return null;
+        
+        // Organize data by type
+        const summaries = Array.isArray(rawData) ? rawData.filter(item => item.type === 'summary') : [];
+        const events = Array.isArray(rawData) ? rawData.filter(item => item.type === 'event') : [];
+        const allActivities = Array.isArray(rawData) ? rawData : [rawData];
+        
+        // Build comprehensive summary with rich context
+        const summary = {
+            date: dayInfo.dateStr,
+            dayLabel: dayInfo.label,
+            dayIndex: dayInfo.dayIndex,
+            fetchedAt: new Date().toISOString(),
+            
+            // Store ALL the rich data
+            coreTasks: summaries.slice(0, 10), // Top 10 summaries by score
+            keyDecisions: summaries.slice(0, 10),
+            documentsReviewed: events.slice(0, 15), // Top 15 events by score
+            nextSteps: allActivities.slice(0, 5),
+            
+            // Rich text summary with ALL details
+            summary: formatComprehensiveSummary(summaries, events)
+        };
+        
+        return summary;
     } catch (error) {
         console.error(`Error fetching summary for ${dayInfo.label}:`, error.message);
         return null;
     }
+}
+
+// Format comprehensive summary with all rich details
+function formatComprehensiveSummary(summaries, events) {
+    const parts = [];
+    
+    if (summaries.length > 0) {
+        parts.push("## 📋 DETAILED WORKSTREAM SUMMARIES\n");
+        summaries.forEach((s, i) => {
+            if (s.content) {
+                parts.push(`### Activity ${i + 1}${s.app ? ` - ${s.app}` : ''}\n${s.content}\n`);
+            }
+        });
+    }
+    
+    if (events.length > 0) {
+        parts.push("\n## 🎯 ACTIVITY EVENTS\n");
+        events.slice(0, 10).forEach((e, i) => {
+            if (e.content) {
+                parts.push(`### Event ${i + 1}${e.window ? ` - ${e.window}` : ''}\n${e.content}\n`);
+            }
+        });
+    }
+    
+    return parts.length > 0 ? parts.join("\n") : "No significant activity recorded.";
+}
+
+// Legacy function kept for backward compatibility (not actively used)
+function buildTextSummary(data) {
+    return "Using new comprehensive summary format.";
+}
+
+// Format Pieces data for display (extracts rich contextual information)
+function formatPiecesData(piecesData) {
+    if (!piecesData || !Array.isArray(piecesData)) return "No data available.";
+    
+    return piecesData.map((item, index) => {
+        // New rich format with app/window context
+        if (item.content && item.type) {
+            const header = [];
+            if (item.app) header.push(`App: ${item.app}`);
+            if (item.window) header.push(`Window: ${item.window}`);
+            if (item.created) header.push(`Time: ${item.created}`);
+            
+            return (header.length > 0 ? `[${header.join(' | ')}]\n` : '') + item.content;
+        }
+        
+        // Legacy formats
+        if (item.text) return item.text;
+        if (item.summary) return item.summary;
+        if (item.combined_string) return item.combined_string;
+        
+        return JSON.stringify(item, null, 2);
+    }).join("\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n");
 }
 
 // Clean up old summaries beyond the rolling window

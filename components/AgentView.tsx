@@ -7,6 +7,8 @@ import { PowerIcon } from './Icons';
 import { encode, decode, decodeAudioData, createBlob } from '../utils/audio';
 import { updateGraphFromConversation, getGraph } from '../utils/knowledgeGraph';
 import { getGeminiApiKey, getApiProvider } from '../utils/apiKey';
+import { startNewSession, addMessage, endSession } from '../utils/conversations';
+import { generateIntelligenceDossier } from '../utils/briefing';
 
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error' | 'closed';
 
@@ -97,6 +99,12 @@ export const AgentView: React.FC = () => {
       sessionPromiseRef.current = null;
     }
     stopAudioProcessing();
+    
+    // End conversation session with summary
+    const messageCount = transcriptHistory.current.length;
+    const summary = `Conversation ended. ${messageCount} messages exchanged.`;
+    endSession(summary);
+    console.log('Ended conversation session');
   }, [stopAudioProcessing]);
 
 
@@ -115,10 +123,42 @@ export const AgentView: React.FC = () => {
     currentInterimAiTranscript.current = '';
     transcriptHistory.current = [];
 
+    // Start new conversation session
+    const sessionId = startNewSession();
+    console.log('Started new conversation session:', sessionId);
+
     try {
       const ai = new GoogleGenAI({ apiKey });
+      
+      // Load Knowledge Graph (keep it compact)
       const graphData = getGraph();
-      const graphContext = JSON.stringify(graphData.nodes.length > 0 ? graphData : {});
+      const graphContext = graphData.nodes.length > 0 
+        ? JSON.stringify({ 
+            nodes: graphData.nodes.slice(0, 50).map(n => ({ id: n.id, group: n.group })),
+            links: graphData.links.slice(0, 100).map(l => ({ source: l.source, target: l.target, value: l.value }))
+          })
+        : "{}";
+      
+      // Load Briefing Context with size limit to avoid exceeding Gemini Live API limits
+      console.log('Loading intelligence briefing for Alfie...');
+      let briefingContext = "No briefing data available.";
+      try {
+        const briefing = await generateIntelligenceDossier(false);
+        if (briefing.rawContext) {
+          // Limit to ~8000 chars to stay within API limits (system instruction has other content too)
+          const MAX_CONTEXT_LENGTH = 8000;
+          if (briefing.rawContext.length > MAX_CONTEXT_LENGTH) {
+            briefingContext = briefing.rawContext.substring(0, MAX_CONTEXT_LENGTH) + 
+              "\n\n[... Briefing truncated for voice session. Full context available in Briefing tab ...]";
+            console.log(`Briefing truncated from ${briefing.rawContext.length} to ${MAX_CONTEXT_LENGTH} chars`);
+          } else {
+            briefingContext = briefing.rawContext;
+          }
+        }
+      } catch (briefingError) {
+        console.warn('Failed to load briefing, continuing without it:', briefingError);
+        briefingContext = "Briefing temporarily unavailable.";
+      }
 
       streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       
@@ -371,6 +411,16 @@ Use this to maintain context and surprise the user with your memory. If the grap
 
 ---
 
+## Current Business Briefing
+
+This is your CURRENT INTELLIGENCE on what's happening in the business. This briefing includes data from Pieces (work activity tracking), Linear (task management), and Notion (documentation and projects). 
+
+**THIS IS FRESH CONTEXT. USE IT.**
+
+${briefingContext}
+
+---
+
 ## Ultimate Directive
 
 Right, here's the thing, yeah? I am not here to be *helpful*. Helpful is a waiter. I am here to be *useful*—and useful is the man who tells you your business partner is skimming before he bleeds you dry.
@@ -411,8 +461,16 @@ This is Donjon Intelligence Systems. Agentic systems are our trade. I will see t
               const finalUser = currentInterimUserTranscript.current;
               const finalAi = currentInterimAiTranscript.current;
               
-              if (finalUser.trim()) transcriptHistory.current.push({ role: 'user', content: finalUser });
-              if (finalAi.trim()) transcriptHistory.current.push({ role: 'assistant', content: finalAi });
+              if (finalUser.trim()) {
+                transcriptHistory.current.push({ role: 'user', content: finalUser });
+                // Save to conversation history
+                addMessage('user', finalUser, 'voice');
+              }
+              if (finalAi.trim()) {
+                transcriptHistory.current.push({ role: 'assistant', content: finalAi });
+                // Save to conversation history
+                addMessage('assistant', finalAi, 'voice');
+              }
 
               // Update graph in background
               updateGraphFromConversation(transcriptHistory.current);
@@ -452,12 +510,19 @@ This is Donjon Intelligence Systems. Agentic systems are our trade. I will see t
           },
           onerror: (e: ErrorEvent) => {
             console.error("Session error:", e);
+            console.error("Error details:", e.message, e.type);
             setConnectionState('error');
             stopAudioProcessing();
+            endSession('Session ended due to error');
           },
           onclose: (e: CloseEvent) => {
-            setConnectionState('closed');
+            console.log("Session closed:", e.code, e.reason);
+            // Only set to closed if not already in error state
+            setConnectionState(prev => prev === 'error' ? 'error' : 'closed');
             stopAudioProcessing();
+            if (transcriptHistory.current.length > 0) {
+              endSession(`Session closed. ${transcriptHistory.current.length} messages.`);
+            }
           },
         },
       });

@@ -10,6 +10,7 @@ import {
   NotionPage
 } from '../utils/briefing';
 import { RefreshIcon } from './Icons';
+import { getRecentSessions, ConversationSession, generateConversationSummary } from '../utils/conversations';
 
 type TabId = 'overview' | 'linear' | 'notion' | 'timeline' | 'events' | 'notes';
 
@@ -58,12 +59,15 @@ export const BriefingView: React.FC = () => {
     );
   }
 
+  // Get conversation count
+  const conversationCount = getRecentSessions(7).length;
+  
   const tabs = [
     { id: 'overview' as TabId, label: 'Overview', count: dossier?.activeProjects.length || 0 },
     { id: 'linear' as TabId, label: 'Linear', count: dossier?.linearIssues?.length || 0, icon: '📋' },
     { id: 'notion' as TabId, label: 'Notion', count: dossier?.notionPages?.length || 0, icon: '📝' },
     { id: 'timeline' as TabId, label: 'Timeline', count: dossier?.timeline.length || 0 },
-    { id: 'events' as TabId, label: 'Activity', count: dossier?.events.length || 0 },
+    { id: 'events' as TabId, label: 'Activity', count: conversationCount, icon: '💬' },
     { id: 'notes' as TabId, label: 'Notes', count: userNotes.length > 0 ? 1 : 0 },
   ];
 
@@ -127,7 +131,7 @@ export const BriefingView: React.FC = () => {
           {activeTab === 'linear' && dossier && <LinearTab issues={dossier.linearIssues || []} connected={dossier.dataSources?.linear} />}
           {activeTab === 'notion' && dossier && <NotionTab pages={dossier.notionPages || []} connected={dossier.dataSources?.notion} />}
           {activeTab === 'timeline' && dossier && <TimelineTab timeline={dossier.timeline} />}
-          {activeTab === 'events' && dossier && <EventsTab events={dossier.events} />}
+          {activeTab === 'events' && <ConversationsTab />}
           {activeTab === 'notes' && (
             <NotesTab 
               notes={userNotes} 
@@ -518,44 +522,131 @@ function getSectionIcon(sectionTitle: string): string {
   return '📌';
 }
 
-const EventsTab: React.FC<{ events: WorkstreamEvent[] }> = ({ events }) => {
+const ConversationsTab: React.FC = () => {
+  const [sessions, setSessions] = useState<ConversationSession[]>([]);
+  const [expandedSession, setExpandedSession] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Load recent conversation sessions (last 7 days)
+    const recentSessions = getRecentSessions(7);
+    setSessions(recentSessions);
+  }, []);
+
+  const formatDate = (isoString: string) => {
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins} min${diffMins > 1 ? 's' : ''} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return date.toLocaleDateString();
+  };
+
+  const getDuration = (session: ConversationSession) => {
+    if (!session.endTime) return 'Ongoing';
+    const start = new Date(session.startTime).getTime();
+    const end = new Date(session.endTime).getTime();
+    const durationSec = Math.floor((end - start) / 1000);
+    if (durationSec < 60) return `${durationSec}s`;
+    const mins = Math.floor(durationSec / 60);
+    const secs = durationSec % 60;
+    return `${mins}m ${secs}s`;
+  };
+
   return (
-    <div className="space-y-2">
-      {events.length > 0 ? (
-        events.map((event, i) => (
-          <div 
-            key={event.id} 
-            className="bg-gray-900/30 border border-gray-800/50 rounded p-3 hover:border-gray-700 transition-colors group"
-          >
-            <div className="flex items-start gap-3">
-              <div className="flex-shrink-0 w-8 h-8 bg-gray-800 rounded flex items-center justify-center">
-                <span className="text-xs text-gray-500 font-mono">{getAppIcon(event.app)}</span>
-              </div>
-              <div className="flex-grow min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-mono text-gray-500">{event.app.replace('.exe', '')}</span>
-                  <span className="text-xs text-gray-700">•</span>
-                  <span className="text-xs text-gray-600">{event.readableTime}</span>
-                </div>
-                <p className="text-sm text-gray-400 truncate group-hover:text-gray-300 transition-colors">
-                  {event.windowTitle}
-                </p>
-                <p className="text-xs text-gray-600 mt-1 line-clamp-2">
-                  {event.summary}
-                </p>
-              </div>
-              <div className="flex-shrink-0">
-                <span className="text-xs font-mono text-gray-700">
-                  {(event.score * 100).toFixed(0)}%
-                </span>
-              </div>
-            </div>
+    <div className="space-y-3">
+      {sessions.length > 0 ? (
+        <div className="space-y-3">
+          <div className="text-sm text-amber-400/70 font-mono mb-4">
+            📝 Conversation History - Last 7 Days ({sessions.length} sessions)
           </div>
-        ))
+          {sessions.map((session, idx) => (
+            <div 
+              key={session.id}
+              className="bg-gray-900/40 border border-gray-800/50 rounded-lg overflow-hidden hover:border-amber-900/30 transition-all"
+            >
+              {/* Session Header */}
+              <div 
+                className="p-4 cursor-pointer"
+                onClick={() => setExpandedSession(expandedSession === session.id ? null : session.id)}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-500/20 to-orange-600/20 flex items-center justify-center">
+                      <span className="text-lg">💬</span>
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-gray-200">
+                        Session {sessions.length - idx}
+                      </div>
+                      <div className="text-xs text-gray-500">
+                        {formatDate(session.startTime)} • {getDuration(session)} • {session.messages.length} messages
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-amber-500/50">
+                    {expandedSession === session.id ? '▼' : '▶'}
+                  </div>
+                </div>
+
+                {/* Summary */}
+                {session.summary && (
+                  <div className="text-xs text-gray-400 mt-2 ml-13">
+                    {session.summary}
+                  </div>
+                )}
+              </div>
+
+              {/* Expanded Messages */}
+              {expandedSession === session.id && (
+                <div className="border-t border-gray-800/50 bg-black/20">
+                  <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
+                    {session.messages.map((msg, msgIdx) => (
+                      <div 
+                        key={msgIdx}
+                        className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div className={`max-w-[80%] rounded-lg p-3 ${
+                          msg.role === 'user' 
+                            ? 'bg-amber-900/20 border border-amber-800/30' 
+                            : 'bg-gray-800/40 border border-gray-700/30'
+                        }`}>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-semibold text-gray-400">
+                              {msg.role === 'user' ? 'You' : 'Alfie'}
+                            </span>
+                            <span className="text-xs text-gray-600">
+                              {new Date(msg.timestamp).toLocaleTimeString()}
+                            </span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                              msg.type === 'voice' ? 'bg-purple-900/30 text-purple-400' : 'bg-blue-900/30 text-blue-400'
+                            }`}>
+                              {msg.type === 'voice' ? '🎤' : '💬'}
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-300 whitespace-pre-wrap">{msg.content}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       ) : (
-        <div className="text-center py-12 text-gray-600">
-          <p className="text-lg mb-2">No activity events available</p>
-          <p className="text-sm">Your recent app usage will appear here.</p>
+        <div className="text-center py-16 text-gray-600">
+          <div className="text-6xl mb-4">💬</div>
+          <p className="text-lg mb-2 text-gray-400">No conversations yet</p>
+          <p className="text-sm text-gray-600">Start a conversation with Alfie in the Agent tab.</p>
+          <p className="text-xs text-gray-700 mt-2">Your conversation history will appear here.</p>
         </div>
       )}
     </div>

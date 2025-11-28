@@ -125,6 +125,11 @@ interface WorkstreamDaySummary {
   dayIndex: number;
   summary: string;
   fetchedAt: string;
+  // Enhanced structured data
+  coreTasks?: any[];
+  keyDecisions?: any[];
+  documentsReviewed?: any[];
+  nextSteps?: any[];
 }
 
 interface RawPiecesResponse {
@@ -561,6 +566,23 @@ export async function generateIntelligenceDossier(forceRefresh = false): Promise
   return dossier;
 }
 
+// Helper to format structured Pieces data
+function formatStructuredPiecesData(data: any): string {
+  if (!data || !Array.isArray(data)) return "No data available.\n";
+  
+  return data.map(item => {
+    if (typeof item === 'string') return item;
+    if (item.text) return item.text;
+    if (item.summary) return item.summary;
+    
+    // If it's a complex object, try to extract meaningful information
+    if (item.combined_string) return item.combined_string;
+    
+    // Last resort: stringify the object
+    return JSON.stringify(item, null, 2);
+  }).join("\n\n") + "\n";
+}
+
 function buildRawContext(
   summaries: WorkstreamSummary[], 
   events: WorkstreamEvent[], 
@@ -613,14 +635,48 @@ function buildRawContext(
     }
   }
 
-  // Multi-day Workstream Summaries - the core context
+  // Multi-day Workstream Summaries - the core context with rich structured data
   context += '### WORKSTREAM SUMMARIES (Rolling 5-Day Context from Pieces)\n';
   context += 'These summaries capture your coding activity, decisions, and focus areas:\n\n';
   
   summaries.forEach((s, i) => {
-    context += `---\n`;
-    context += `**${s.readableTime}** ${s.timeRange ? `(${s.timeRange})` : ''}\n`;
-    context += `${s.content}\n\n`;
+    context += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+    context += `## ${s.readableTime.toUpperCase()} ${s.timeRange ? `(${s.timeRange})` : ''}\n`;
+    context += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+    
+    // Check if we have structured data (new format) or just text (legacy)
+    const hasStructuredData = (s as any).coreTasks || (s as any).keyDecisions || 
+                               (s as any).documentsReviewed || (s as any).nextSteps;
+    
+    if (hasStructuredData) {
+      // Display structured data with clear sections
+      if ((s as any).coreTasks) {
+        context += `### 📋 CORE TASKS & PROJECTS\n`;
+        context += formatStructuredPiecesData((s as any).coreTasks);
+        context += `\n`;
+      }
+      
+      if ((s as any).keyDecisions) {
+        context += `### 💡 KEY DISCUSSIONS & DECISIONS\n`;
+        context += formatStructuredPiecesData((s as any).keyDecisions);
+        context += `\n`;
+      }
+      
+      if ((s as any).documentsReviewed) {
+        context += `### 📄 DOCUMENTS & CODE REVIEWED\n`;
+        context += formatStructuredPiecesData((s as any).documentsReviewed);
+        context += `\n`;
+      }
+      
+      if ((s as any).nextSteps) {
+        context += `### ⏭️ NEXT STEPS\n`;
+        context += formatStructuredPiecesData((s as any).nextSteps);
+        context += `\n`;
+      }
+    } else {
+      // Legacy format: just display the summary text
+      context += `${s.content}\n\n`;
+    }
   });
 
   // Key Decisions extracted across all days
