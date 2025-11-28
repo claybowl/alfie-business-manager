@@ -20,7 +20,7 @@ load_dotenv()
 class EpisodeRequest(BaseModel):
     content: str
     source: str = "alfie_conversation"
-    episode_type: str = "conversation"  # conversation, message, text
+    episode_type: str = "message"  # message, text, json
     metadata: Optional[dict] = None
 
 class SearchRequest(BaseModel):
@@ -96,7 +96,7 @@ async def add_episode(request: EpisodeRequest):
         client = await get_graphiti_client()
         result = await client.add_episode(
             content=request.content,
-            source=request.source,
+            source_name=request.source,
             episode_type=request.episode_type,
             metadata=request.metadata
         )
@@ -123,8 +123,8 @@ async def add_conversation(request: ConversationRequest):
         
         result = await client.add_episode(
             content=conversation_text,
-            source=f"alfie_session_{request.session_id}" if request.session_id else "alfie_conversation",
-            episode_type="conversation"
+            source_name=f"alfie_session_{request.session_id}" if request.session_id else "alfie_conversation",
+            episode_type="text"  # Use text for multi-turn conversations
         )
         return result
     except Exception as e:

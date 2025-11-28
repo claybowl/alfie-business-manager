@@ -37,14 +37,23 @@ class GraphitiClient:
         try:
             print(f"Connecting to Neo4j at {self.neo4j_uri}...")
             
+            # Graphiti uses uri, user, password (not neo4j_ prefixed)
             self.graphiti = Graphiti(
-                neo4j_uri=self.neo4j_uri,
-                neo4j_user=self.neo4j_user,
-                neo4j_password=self.neo4j_password,
+                uri=self.neo4j_uri,
+                user=self.neo4j_user,
+                password=self.neo4j_password,
             )
             
-            # Build indices for efficient querying
-            await self.graphiti.build_indices_and_constraints()
+            # Try to build indices, but ignore "already exists" errors
+            # (Neo4j Aura sometimes throws these even with IF NOT EXISTS)
+            try:
+                await self.graphiti.build_indices_and_constraints()
+                print("✓ Indices created/verified")
+            except Exception as idx_err:
+                if "EquivalentSchemaRuleAlreadyExists" in str(idx_err):
+                    print("✓ Indices already exist (OK)")
+                else:
+                    print(f"⚠ Index warning (non-fatal): {idx_err}")
             
             self._initialized = True
             print("✓ Graphiti initialized successfully")
@@ -52,6 +61,8 @@ class GraphitiClient:
             
         except Exception as e:
             print(f"✗ Failed to initialize Graphiti: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     async def close(self):
@@ -63,8 +74,8 @@ class GraphitiClient:
     async def add_episode(
         self,
         content: str,
-        source: str = "alfie_conversation",
-        episode_type: str = "conversation",
+        source_name: str = "alfie_conversation",
+        episode_type: str = "message",
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
@@ -80,31 +91,34 @@ class GraphitiClient:
             await self.initialize()
         
         try:
-            # Map episode type
-            ep_type = EpisodeType.conversation
-            if episode_type == "message":
-                ep_type = EpisodeType.message
-            elif episode_type == "text":
+            # Map episode type (available: message, json, text)
+            ep_type = EpisodeType.message  # Default to message
+            if episode_type == "text":
                 ep_type = EpisodeType.text
+            elif episode_type == "json":
+                ep_type = EpisodeType.json
             
-            # Add the episode
+            # Add the episode with correct parameter names
             episode = await self.graphiti.add_episode(
-                name=f"{source}_{datetime.now().isoformat()}",
+                name=f"{source_name}_{datetime.now().isoformat()}",
                 episode_body=content,
-                source=source,
-                source_description=f"Alfie Business Manager - {source}",
+                source_description=f"Alfie Business Manager - {source_name}",
                 reference_time=datetime.now(),
-                episode_type=ep_type,
+                source=ep_type,  # 'source' is the EpisodeType, not the source name!
             )
             
             return {
                 "success": True,
-                "episode_id": str(episode.uuid) if hasattr(episode, 'uuid') else None,
-                "message": "Episode added successfully"
+                "episode_id": str(episode.episode.uuid) if hasattr(episode, 'episode') else None,
+                "message": "Episode added successfully",
+                "entities_count": len(episode.nodes) if hasattr(episode, 'nodes') else 0,
+                "edges_count": len(episode.edges) if hasattr(episode, 'edges') else 0
             }
             
         except Exception as e:
             print(f"Error adding episode: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 "success": False,
                 "error": str(e)

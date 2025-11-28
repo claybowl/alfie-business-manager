@@ -9,12 +9,15 @@ import EventSource from 'eventsource';
 global.EventSource = EventSource;
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3002;
 const PIECES_SSE_URL = 'http://localhost:39300/model_context_protocol/2024-11-05/sse';
 
 // API Keys (loaded from environment variables)
 const LINEAR_API_KEY = process.env.LINEAR_API_KEY;
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
+
+// Graphiti Service URL (Python microservice for temporal knowledge graph)
+const GRAPHITI_SERVICE_URL = process.env.GRAPHITI_SERVICE_URL || 'http://localhost:8000';
 
 if (!LINEAR_API_KEY || !NOTION_API_KEY) {
   console.error('ERROR: Missing required API keys in environment variables');
@@ -1098,11 +1101,131 @@ app.get('/api/briefing/full', async (req, res) => {
     res.json(results);
 });
 
+// ============================================================================
+// GRAPHITI TEMPORAL KNOWLEDGE GRAPH ENDPOINTS
+// ============================================================================
+
+// Health check for Graphiti service
+app.get('/api/graph/health', async (req, res) => {
+    try {
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/health`);
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        res.status(503).json({ 
+            status: 'unavailable', 
+            error: error.message,
+            graphiti_url: GRAPHITI_SERVICE_URL 
+        });
+    }
+});
+
+// Add episode to knowledge graph (conversations, events, etc.)
+app.post('/api/graph/episode', async (req, res) => {
+    try {
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/episodes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req.body)
+        });
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Graphiti episode error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Add full conversation to knowledge graph
+app.post('/api/graph/conversation', async (req, res) => {
+    try {
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/conversations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req.body)
+        });
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Graphiti conversation error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Search the knowledge graph
+app.get('/api/graph/search', async (req, res) => {
+    try {
+        const query = req.query.query || '';
+        const limit = req.query.limit || 10;
+        const response = await fetch(
+            `${GRAPHITI_SERVICE_URL}/search?query=${encodeURIComponent(query)}&limit=${limit}`
+        );
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Graphiti search error:', error);
+        res.status(500).json({ success: false, error: error.message, results: [] });
+    }
+});
+
+// Get full graph data for visualization
+app.get('/api/graph/data', async (req, res) => {
+    try {
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/graph`);
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Graphiti graph data error:', error);
+        res.status(500).json({ success: false, error: error.message, nodes: [], links: [] });
+    }
+});
+
+// Get all nodes
+app.get('/api/graph/nodes', async (req, res) => {
+    try {
+        const limit = req.query.limit || 100;
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/nodes?limit=${limit}`);
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Graphiti nodes error:', error);
+        res.status(500).json({ success: false, error: error.message, nodes: [] });
+    }
+});
+
+// Get all edges
+app.get('/api/graph/edges', async (req, res) => {
+    try {
+        const limit = req.query.limit || 200;
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/edges?limit=${limit}`);
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Graphiti edges error:', error);
+        res.status(500).json({ success: false, error: error.message, edges: [] });
+    }
+});
+
+// Clear the knowledge graph (dangerous!)
+app.delete('/api/graph/clear', async (req, res) => {
+    try {
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/graph`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Graphiti clear error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
   console.log('Data sources:');
   console.log('  - Pieces MCP: Connecting...');
   console.log('  - Linear API: Configured');
   console.log('  - Notion API: Configured');
+  console.log(`  - Graphiti KG: ${GRAPHITI_SERVICE_URL}`);
 });
 

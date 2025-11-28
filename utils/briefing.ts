@@ -163,7 +163,7 @@ interface FullBriefingResponse {
 
 async function fetchFullBriefingData(): Promise<FullBriefingResponse> {
   try {
-    const response = await fetch('http://localhost:3001/api/briefing/full');
+    const response = await fetch('http://localhost:3002/api/briefing/full');
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -181,7 +181,7 @@ async function fetchFullBriefingData(): Promise<FullBriefingResponse> {
 
 async function fetchRawPiecesData(): Promise<RawPiecesResponse> {
   try {
-    const response = await fetch('http://localhost:3001/api/pieces/activity');
+    const response = await fetch('http://localhost:3002/api/pieces/activity');
     if (!response.ok) {
       return { total: 0, activities: [] };
     }

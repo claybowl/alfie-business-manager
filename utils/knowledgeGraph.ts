@@ -1,10 +1,12 @@
-import { GoogleGenAI, Type } from '@google/genai';
-import { getApiProvider, getGeminiApiKey, getOpenRouterApiKey } from './apiKey';
+// Graphiti Temporal Knowledge Graph Integration
+// Now uses Graphiti API via backend proxy instead of localStorage
 
 // Define the structure of our graph data
 export interface Node {
   id: string;
   group: string;
+  uuid?: string;
+  summary?: string;
   fx?: number;
   fy?: number;
   x?: number;
@@ -16,6 +18,8 @@ export interface Link {
   source: string;
   target: string;
   value: string;
+  created_at?: string;
+  valid_at?: string;
 }
 
 export interface KnowledgeGraphData {
@@ -23,230 +27,256 @@ export interface KnowledgeGraphData {
   links: Link[];
 }
 
-const STORAGE_KEY = 'alfie-knowledge-graph';
+const BACKEND_URL = 'http://localhost:3002';
+const POSITION_STORAGE_KEY = 'alfie-graph-positions'; // Local storage for visual positions only
 
-// Function to get the graph from localStorage
+// Cache for graph data to avoid excessive API calls
+let graphCache: KnowledgeGraphData | null = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 5000; // 5 seconds
+
+// Function to get the graph from Graphiti API
 export const getGraph = (): KnowledgeGraphData => {
-  try {
-    const storedData = localStorage.getItem(STORAGE_KEY);
-    if (storedData) {
-      const graph = JSON.parse(storedData);
-      // The force graph will use fx/fy for fixed positions and x/y for initial positions if they exist.
-      return graph;
-    }
-  } catch (error) {
-    console.error("Error reading knowledge graph from localStorage:", error);
+  // Return cached data synchronously if available
+  // The actual fetch happens asynchronously via fetchGraphData()
+  if (graphCache) {
+    return graphCache;
   }
   return { nodes: [], links: [] };
 };
 
-// Function to save the graph to localStorage
-const saveGraph = (graph: KnowledgeGraphData, dispatchEvent = true) => {
-  try {
-    // Sanitize node positions before saving to prevent corruption from invalid physics values (e.g., Infinity)
-    graph.nodes.forEach(node => {
-        if (node.x !== undefined && !isFinite(node.x)) delete node.x;
-        if (node.y !== undefined && !isFinite(node.y)) delete node.y;
-        if (node.fx !== undefined && !isFinite(node.fx)) delete node.fx;
-        if (node.fy !== undefined && !isFinite(node.fy)) delete node.fy;
-    });
+// Async function to fetch fresh graph data from Graphiti
+export const fetchGraphData = async (): Promise<KnowledgeGraphData> => {
+  const now = Date.now();
+  
+  // Return cache if still valid
+  if (graphCache && (now - lastFetchTime) < CACHE_DURATION) {
+    return graphCache;
+  }
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(graph));
-    if (dispatchEvent) {
-        window.dispatchEvent(new Event('storage')); // Notify other components of change
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/graph/data`);
+    if (!response.ok) {
+      console.error('Failed to fetch graph data:', response.status);
+      return graphCache || { nodes: [], links: [] };
     }
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      // Transform Graphiti format to our visualization format
+      const nodes: Node[] = (data.nodes || []).map((n: any) => ({
+        id: n.id || n.name,
+        group: n.group || 'Entity',
+        uuid: n.uuid,
+        summary: n.summary
+      }));
+      
+      const links: Link[] = (data.links || []).map((l: any) => ({
+        source: l.source,
+        target: l.target,
+        value: l.value || 'relates to',
+        created_at: l.created_at,
+        valid_at: l.valid_at
+      }));
+      
+      // Restore saved positions
+      const savedPositions = getSavedPositions();
+      nodes.forEach(node => {
+        const saved = savedPositions[node.id];
+        if (saved) {
+          node.x = saved.x;
+          node.y = saved.y;
+          node.fx = saved.fx;
+          node.fy = saved.fy;
+        }
+      });
+      
+      graphCache = { nodes, links };
+      lastFetchTime = now;
+      
+      // Notify listeners
+      window.dispatchEvent(new Event('graphDataUpdated'));
+      
+      return graphCache;
+    }
+    
+    return graphCache || { nodes: [], links: [] };
   } catch (error) {
-    console.error("Error saving knowledge graph to localStorage:", error);
+    console.error('Error fetching graph data:', error);
+    return graphCache || { nodes: [], links: [] };
   }
 };
 
-// Saves only the positions of nodes, to persist the visual layout
-export const saveNodePositions = (layoutNodes: Node[]) => {
-    const graph = getGraph();
-    // Create a map of the new positions and pinned states from the layout nodes
-    const positionMap = new Map(layoutNodes.map(n => [n.id, { x: n.x, y: n.y, fx: n.fx, fy: n.fy }]));
-
-    graph.nodes.forEach(node => {
-        const layoutNode = positionMap.get(node.id);
-        if (layoutNode) {
-            // Update positions from the simulation
-            node.x = layoutNode.x;
-            node.y = layoutNode.y;
-            // Persist the fixed position state
-            if (layoutNode.fx !== undefined) {
-                node.fx = layoutNode.fx;
-            } else {
-                delete node.fx; // Un-pinned
-            }
-            if (layoutNode.fy !== undefined) {
-                node.fy = layoutNode.fy;
-            } else {
-                delete node.fy; // Un-pinned
-            }
-        }
-    });
-
-    saveGraph(graph, false);
-};
-
-
-// Function to clear the graph
-export const clearGraph = () => {
-    try {
-        localStorage.removeItem(STORAGE_KEY);
-        window.dispatchEvent(new Event('storage'));
-    } catch (error) {
-        console.error("Error clearing knowledge graph:", error);
-    }
-}
-
-const getExtractionPrompt = (currentGraph: KnowledgeGraphData, recentConversation: string) => {
-    return `Analyze the following conversation excerpt and extract key entities and their relationships.
-  
-    Entities should be nouns (people, places, concepts). Classify them into groups like 'person', 'place', 'organization', 'concept', 'object', or 'event'.
-    Relationships should be concise verbs or short phrases describing how entities are connected.
-  
-    Existing Knowledge Graph:
-    ${JSON.stringify(currentGraph)}
-  
-    Recent Conversation:
-    """
-    ${recentConversation}
-    """
-  
-    Based on the "Recent Conversation" and considering the "Existing Knowledge Graph" to avoid duplicates, identify *new* entities and relationships.
-    Return ONLY a valid JSON object with 'nodes' and 'links' arrays containing ONLY the new items. If no new nodes or links are found, you can omit the corresponding key.
-    `;
-}
-
-const processApiResponse = (responseText: string, currentGraph: KnowledgeGraphData) => {
-    const cleanResponse = responseText.replace(/^```json\n?/, '').replace(/\n?```$/, '');
-    const newGraphData = JSON.parse(cleanResponse) as Partial<KnowledgeGraphData>;
-
-    if (newGraphData) {
-        let graphWasUpdated = false;
-        
-        // Add new nodes first
-        if (newGraphData.nodes?.length > 0) {
-            const existingNodeIds = new Set(currentGraph.nodes.map(n => n.id.toLowerCase()));
-            newGraphData.nodes.forEach(newNode => {
-                if (!existingNodeIds.has(newNode.id.toLowerCase())) {
-                    currentGraph.nodes.push(newNode);
-                    existingNodeIds.add(newNode.id.toLowerCase());
-                    graphWasUpdated = true;
-                }
-            });
-        }
-
-        // Then add new links, checking against the updated node list
-        if (newGraphData.links?.length > 0) {
-            const existingLinkSignatures = new Set(currentGraph.links.map(l => `${l.source.toLowerCase()}-${l.target.toLowerCase()}-${l.value.toLowerCase()}`));
-            const allNodeIds = new Set(currentGraph.nodes.map(n => n.id.toLowerCase()));
-            
-            newGraphData.links.forEach(newLink => {
-                const sourceExists = allNodeIds.has(newLink.source.toLowerCase());
-                const targetExists = allNodeIds.has(newLink.target.toLowerCase());
-                const signature = `${newLink.source.toLowerCase()}-${newLink.target.toLowerCase()}-${newLink.value.toLowerCase()}`;
-                
-                if (sourceExists && targetExists && !existingLinkSignatures.has(signature)) {
-                    currentGraph.links.push(newLink);
-                    existingLinkSignatures.add(signature);
-                    graphWasUpdated = true;
-                }
-            });
-        }
-        
-        if (graphWasUpdated) {
-            saveGraph(currentGraph);
-        }
-    }
-};
-
-// Function to update the graph based on conversation history
-export const updateGraphFromConversation = async (conversation: { role: string, content: string }[]): Promise<void> => {
-  const apiProvider = getApiProvider();
-  if (conversation.length === 0) return;
-
-  const currentGraph = getGraph();
-  const recentConversation = conversation.slice(-4).map(turn => `${turn.role}: ${turn.content}`).join('\n');
-  const prompt = getExtractionPrompt(currentGraph, recentConversation);
-
+// Get saved node positions from localStorage
+const getSavedPositions = (): Record<string, { x?: number; y?: number; fx?: number; fy?: number }> => {
   try {
-    let responseText: string | null = null;
+    const saved = localStorage.getItem(POSITION_STORAGE_KEY);
+    return saved ? JSON.parse(saved) : {};
+  } catch {
+    return {};
+  }
+};
 
-    if (apiProvider === 'gemini') {
-        const apiKey = getGeminiApiKey();
-        if (!apiKey) return;
-        
-        const ai = new GoogleGenAI({ apiKey });
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        nodes: {
-                            type: Type.ARRAY,
-                            items: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    id: { type: Type.STRING, description: "Name of the entity (e.g., 'Tommy Shelby')" },
-                                    group: { type: Type.STRING, description: "Classification of the entity (e.g., 'person')" }
-                                },
-                                required: ['id', 'group']
-                            }
-                        },
-                        links: {
-                            type: Type.ARRAY,
-                            items: {
-                                type: Type.OBJECT,
-                                properties: {
-                                    source: { type: Type.STRING, description: "Source entity 'id'" },
-                                    target: { type: Type.STRING, description: "Target entity 'id'" },
-                                    value: { type: Type.STRING, description: "Description of the relationship" }
-                                },
-                                required: ['source', 'target', 'value']
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        responseText = response.text;
-
-    } else { // openrouter
-        const apiKey = getOpenRouterApiKey();
-        if (!apiKey) return;
-
-        const apiResponse = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${apiKey}`,
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-                model: "google/gemini-flash-1.5",
-                messages: [{ role: "user", content: prompt }],
-                response_format: { type: "json_object" },
-            })
-        });
-
-        if (!apiResponse.ok) {
-            console.error("OpenRouter knowledge graph update error:", await apiResponse.text());
-            return;
-        }
-
-        const data = await apiResponse.json();
-        responseText = data.choices[0].message.content;
-    }
-
-    if (responseText) {
-        processApiResponse(responseText, currentGraph);
-    }
-
+// Saves only the positions of nodes to localStorage (for visual layout persistence)
+export const saveNodePositions = (layoutNodes: Node[]) => {
+  try {
+    const positions: Record<string, { x?: number; y?: number; fx?: number; fy?: number }> = {};
+    
+    layoutNodes.forEach(node => {
+      // Sanitize positions
+      const x = node.x !== undefined && isFinite(node.x) ? node.x : undefined;
+      const y = node.y !== undefined && isFinite(node.y) ? node.y : undefined;
+      const fx = node.fx !== undefined && isFinite(node.fx) ? node.fx : undefined;
+      const fy = node.fy !== undefined && isFinite(node.fy) ? node.fy : undefined;
+      
+      if (x !== undefined || y !== undefined || fx !== undefined || fy !== undefined) {
+        positions[node.id] = { x, y, fx, fy };
+      }
+    });
+    
+    localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(positions));
   } catch (error) {
-    console.error("Failed to update knowledge graph:", error);
+    console.error("Error saving node positions:", error);
+  }
+};
+
+// Function to clear the graph via Graphiti API
+export const clearGraph = async (): Promise<boolean> => {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/graph/clear`, {
+      method: 'DELETE'
+    });
+    const data = await response.json();
+    
+    if (data.success) {
+      // Clear local cache and positions
+      graphCache = null;
+      lastFetchTime = 0;
+      localStorage.removeItem(POSITION_STORAGE_KEY);
+      window.dispatchEvent(new Event('graphDataUpdated'));
+      return true;
+    }
+    
+    console.error('Failed to clear graph:', data.error);
+    return false;
+  } catch (error) {
+    console.error('Error clearing graph:', error);
+    return false;
+  }
+};
+
+// Add an episode to Graphiti (replaces the old LLM-based extraction)
+export const addEpisodeToGraph = async (
+  content: string,
+  source: string = 'alfie_conversation',
+  episodeType: string = 'message'
+): Promise<{ success: boolean; entities_count?: number; edges_count?: number; error?: string }> => {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/graph/episode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        content,
+        source,
+        episode_type: episodeType
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      // Invalidate cache so next fetch gets fresh data
+      graphCache = null;
+      lastFetchTime = 0;
+      window.dispatchEvent(new Event('graphDataUpdated'));
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('Error adding episode to graph:', error);
+    return { success: false, error: String(error) };
+  }
+};
+
+// Add a full conversation to Graphiti
+export const addConversationToGraph = async (
+  messages: { role: string; content: string }[],
+  sessionId?: string
+): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/graph/conversation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages,
+        session_id: sessionId
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      graphCache = null;
+      lastFetchTime = 0;
+      window.dispatchEvent(new Event('graphDataUpdated'));
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('Error adding conversation to graph:', error);
+    return { success: false, error: String(error) };
+  }
+};
+
+// Search the knowledge graph
+export const searchGraph = async (
+  query: string,
+  limit: number = 10
+): Promise<{ success: boolean; results: any[]; error?: string }> => {
+  try {
+    const response = await fetch(
+      `${BACKEND_URL}/api/graph/search?query=${encodeURIComponent(query)}&limit=${limit}`
+    );
+    return await response.json();
+  } catch (error) {
+    console.error('Error searching graph:', error);
+    return { success: false, results: [], error: String(error) };
+  }
+};
+
+// Legacy function - now sends to Graphiti instead of doing local extraction
+export const updateGraphFromConversation = async (
+  conversation: { role: string; content: string }[]
+): Promise<void> => {
+  if (conversation.length === 0) return;
+  
+  // Format conversation as text for Graphiti to process
+  const recentConversation = conversation.slice(-6).map(
+    turn => `${turn.role.toUpperCase()}: ${turn.content}`
+  ).join('\n');
+  
+  // Send to Graphiti for entity extraction
+  const result = await addEpisodeToGraph(
+    recentConversation,
+    'alfie_voice_conversation',
+    'message'
+  );
+  
+  if (result.success) {
+    console.log(`Knowledge graph updated: ${result.entities_count || 0} entities, ${result.edges_count || 0} relationships`);
+  } else {
+    console.error('Failed to update knowledge graph:', result.error);
+  }
+};
+
+// Check if Graphiti service is available
+export const checkGraphitiHealth = async (): Promise<boolean> => {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/graph/health`);
+    const data = await response.json();
+    return data.status === 'healthy' && data.initialized === true;
+  } catch {
+    return false;
   }
 };

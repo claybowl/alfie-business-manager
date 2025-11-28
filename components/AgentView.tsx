@@ -5,7 +5,7 @@ import { GoogleGenAI, LiveServerMessage, Modality, Blob } from '@google/genai';
 import { Orb } from './Orb';
 import { PowerIcon } from './Icons';
 import { encode, decode, decodeAudioData, createBlob } from '../utils/audio';
-import { updateGraphFromConversation, getGraph } from '../utils/knowledgeGraph';
+import { updateGraphFromConversation, getGraph, addConversationToGraph, fetchGraphData } from '../utils/knowledgeGraph';
 import { getGeminiApiKey, getApiProvider } from '../utils/apiKey';
 import { startNewSession, addMessage, endSession } from '../utils/conversations';
 import { generateIntelligenceDossier } from '../utils/briefing';
@@ -104,6 +104,18 @@ export const AgentView: React.FC = () => {
     const messageCount = transcriptHistory.current.length;
     const summary = `Conversation ended. ${messageCount} messages exchanged.`;
     endSession(summary);
+    
+    // Save full conversation to Graphiti temporal knowledge graph
+    if (transcriptHistory.current.length > 0) {
+      addConversationToGraph(transcriptHistory.current).then(result => {
+        if (result.success) {
+          console.log('Conversation saved to Graphiti knowledge graph');
+        } else {
+          console.error('Failed to save conversation to Graphiti:', result.error);
+        }
+      });
+    }
+    
     console.log('Ended conversation session');
   }, [stopAudioProcessing]);
 
@@ -130,8 +142,8 @@ export const AgentView: React.FC = () => {
     try {
       const ai = new GoogleGenAI({ apiKey });
       
-      // Load Knowledge Graph (keep it compact)
-      const graphData = getGraph();
+      // Load Knowledge Graph from Graphiti (keep it compact)
+      const graphData = await fetchGraphData();
       const graphContext = graphData.nodes.length > 0 
         ? JSON.stringify({ 
             nodes: graphData.nodes.slice(0, 50).map(n => ({ id: n.id, group: n.group })),
