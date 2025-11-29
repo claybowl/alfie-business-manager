@@ -38,8 +38,8 @@ export const BriefingView: React.FC = () => {
     loadDossier();
   }, []);
 
-  const handleSaveNotes = () => {
-    saveUserNotes(userNotes);
+  const handleSaveNotes = async () => {
+    await saveUserNotes(userNotes);
     setNotesSaved(true);
     setTimeout(() => setNotesSaved(false), 2000);
   };
@@ -151,6 +151,10 @@ export const BriefingView: React.FC = () => {
 // ============================================================================
 
 const OverviewTab: React.FC<{ dossier: IntelligenceDossier }> = ({ dossier }) => {
+  const maxActivity = dossier.activeProjects.length > 0
+    ? Math.max(...dossier.activeProjects.map(p => p.activityCount))
+    : 0;
+
   return (
     <div className="space-y-6">
       {/* Active Projects */}
@@ -162,7 +166,7 @@ const OverviewTab: React.FC<{ dossier: IntelligenceDossier }> = ({ dossier }) =>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {dossier.activeProjects.length > 0 ? (
             dossier.activeProjects.map((project, i) => (
-              <ProjectCard key={i} project={project} />
+              <ProjectCard key={i} project={project} maxActivity={maxActivity} />
             ))
           ) : (
             <div className="col-span-full text-center py-8 text-gray-600 border border-dashed border-gray-800 rounded-lg">
@@ -257,6 +261,49 @@ const OverviewTab: React.FC<{ dossier: IntelligenceDossier }> = ({ dossier }) =>
 };
 
 const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) => {
+  const [refreshedTimeline, setRefreshedTimeline] = useState<WorkstreamSummary[]>(timeline);
+  const [isRefreshingToday, setIsRefreshingToday] = useState(false);
+
+  // Auto-refresh today's data periodically
+  useEffect(() => {
+    setRefreshedTimeline(timeline);
+
+    const isToday = timeline.length > 0 && timeline[0].readableTime?.toLowerCase().includes('today');
+    if (!isToday) return;
+
+    const refreshTodayData = async () => {
+      setIsRefreshingToday(true);
+      try {
+        const response = await fetch('http://localhost:3002/api/briefing/full');
+        if (response.ok) {
+          const fullData = await response.json();
+          if (fullData.pieces?.summaries) {
+            const todaySummaries = fullData.pieces.summaries
+              .filter((s: any) => s.dayLabel?.toLowerCase().includes('today'))
+              .map((daySummary: any, index: number) => ({
+                id: `day-${daySummary.date}-${index}`,
+                created: daySummary.fetchedAt || '',
+                readableTime: daySummary.dayLabel || 'Today',
+                timeRange: daySummary.date || '',
+                content: (daySummary.summary || '').replace(/\\n/g, '\n').replace(/\\"/g, '"')
+              }));
+
+            if (todaySummaries.length > 0) {
+              setRefreshedTimeline([...todaySummaries, ...refreshedTimeline.slice(1)]);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to refresh today data:', error);
+      }
+      setIsRefreshingToday(false);
+    };
+
+    // Refresh today's data every 5 minutes if it's still today
+    const interval = setInterval(refreshTodayData, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [timeline]);
+
   // Clean content before processing - removes JSON artifacts and metadata
   const cleanContent = (raw: string): string => {
     let cleaned = raw;
@@ -323,14 +370,15 @@ const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) 
     <div className="space-y-6">
       {/* Context info banner */}
       <div className="flex items-center gap-3 p-3 bg-amber-900/10 border border-amber-800/30 rounded-lg">
-        <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
+        <div className={`w-2 h-2 ${isRefreshingToday ? 'bg-green-500 animate-spin' : 'bg-amber-500 animate-pulse'} rounded-full`}></div>
         <span className="text-xs text-amber-300/80 font-mono">
-          ROLLING 5-DAY CONTEXT WINDOW • {timeline.length} day{timeline.length !== 1 ? 's' : ''} of activity captured
+          ROLLING 5-DAY CONTEXT WINDOW • {refreshedTimeline.length} day{refreshedTimeline.length !== 1 ? 's' : ''} of activity captured
+          {isRefreshingToday && ' • Refreshing today...'}
         </span>
       </div>
 
-      {timeline.length > 0 ? (
-        timeline.map((summary, i) => {
+      {refreshedTimeline.length > 0 ? (
+        refreshedTimeline.map((summary, i) => {
           const sections = parseSummaryIntoSections(summary.content);
           const hasStructuredContent = sections.length > 0;
           
@@ -654,6 +702,9 @@ const ConversationsTab: React.FC = () => {
 };
 
 const LinearTab: React.FC<{ issues: LinearIssueData[]; connected?: boolean }> = ({ issues, connected }) => {
+  // Filter out cancelled issues
+  const activeIssues = issues.filter(issue => issue.statusType?.toLowerCase() !== 'canceled');
+
   const getPriorityLabel = (priority: number) => {
     const labels = ['None', 'Urgent', 'High', 'Medium', 'Low'];
     return labels[priority] || 'Unknown';
@@ -694,12 +745,12 @@ const LinearTab: React.FC<{ issues: LinearIssueData[]; connected?: boolean }> = 
     <div className="space-y-4">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-bold text-gray-200">Active Issues</h2>
-        <span className="text-xs font-mono text-gray-500">{issues.length} issues</span>
+        <span className="text-xs font-mono text-gray-500">{activeIssues.length} active {activeIssues.length !== 1 ? 'issues' : 'issue'}</span>
       </div>
-      
-      {issues.length > 0 ? (
+
+      {activeIssues.length > 0 ? (
         <div className="space-y-3">
-          {issues.map((issue) => (
+          {activeIssues.map((issue) => (
             <div 
               key={issue.id}
               className="bg-gray-900/40 border border-gray-800 rounded-lg p-4 hover:border-indigo-500/30 transition-colors"
@@ -852,13 +903,34 @@ const NotesTab: React.FC<{
 // HELPER COMPONENTS
 // ============================================================================
 
-const ProjectCard: React.FC<{ project: ActiveProject }> = ({ project }) => {
+const ProjectCard: React.FC<{ project: ActiveProject; maxActivity: number }> = ({ project, maxActivity }) => {
+  // Heatmap color based on activity count (0-100 scale)
+  const getHeatmapColor = (count: number, max: number): string => {
+    if (max === 0) return 'bg-gray-800/30 text-gray-400 border-gray-700/30';
+
+    const intensity = count / max; // 0 to 1
+
+    if (intensity >= 0.8) {
+      return 'bg-red-900/30 text-red-400 border-red-700/30';
+    } else if (intensity >= 0.6) {
+      return 'bg-orange-900/30 text-orange-400 border-orange-700/30';
+    } else if (intensity >= 0.4) {
+      return 'bg-yellow-900/30 text-yellow-400 border-yellow-700/30';
+    } else if (intensity >= 0.2) {
+      return 'bg-cyan-900/30 text-cyan-400 border-cyan-700/30';
+    } else {
+      return 'bg-blue-900/30 text-blue-400 border-blue-700/30';
+    }
+  };
+
+  const heatmapColor = getHeatmapColor(project.activityCount, maxActivity);
+
   return (
-    <div className="bg-gray-900/40 border border-gray-800 rounded-lg p-4 hover:border-green-500/30 transition-colors">
+    <div className={`border rounded-lg p-4 hover:border-opacity-100 transition-all ${heatmapColor}`}>
       <div className="flex items-start justify-between mb-2">
-        <h3 className="text-sm font-semibold text-gray-200 truncate">{project.name}</h3>
-        <span className="text-xs bg-green-900/30 text-green-400 px-2 py-0.5 rounded font-mono">
-          {project.activityCount}
+        <h3 className="text-sm font-semibold text-gray-100 truncate">{project.name}</h3>
+        <span className={`text-xs px-2 py-0.5 rounded font-mono ${heatmapColor.replace('bg-', 'text-').replace('border', '')}`}>
+          {project.activityCount} hit{project.activityCount !== 1 ? 's' : ''}
         </span>
       </div>
       <div className="text-xs text-gray-500">

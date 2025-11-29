@@ -356,67 +356,61 @@ function extractDecisionsFromContent(content: string, decisions: string[]): void
   }
 }
 
-// Helper: Extract projects from summary content
+// Helper: Extract projects from summary content (only real projects)
 function extractProjectsFromContent(
-  content: string, 
+  content: string,
   activeProjects: Map<string, ActiveProject>,
   dayLabel: string
 ): void {
-  // Stopwords to filter out common non-project words
-  const stopwords = new Set([
-    'the', 'and', 'for', 'with', 'from', 'this', 'that', 'into', 'new', 'old',
-    'some', 'any', 'all', 'most', 'more', 'less', 'each', 'every', 'both',
-    'other', 'another', 'such', 'only', 'just', 'also', 'very', 'even',
-    'working', 'developing', 'implementing', 'project', 'app', 'application',
-    'system', 'backend', 'frontend', 'server', 'client', 'api', 'code',
-    'sorting', 'improving', 'fixing', 'updating', 'adding', 'removing',
-    'parsing', 'formatting', 'management', 'template', 'templates'
-  ]);
-  
-  // Look for project names in various patterns
-  // Pattern 1: "project/working on/developing/implementing ProjectName" - single word only
-  const projectPatterns = [
-    /(?:project|working on|developing|implementing)\s+["']?([A-Z][a-zA-Z0-9-]+)["']?/g,
-    /\*\*([A-Z][a-zA-Z0-9-]+)\*\*\s*(?:project|app|application|system)/gi,
-    /([A-Z][a-zA-Z0-9-]+)\s+(?:backend|frontend|server|client|API)/g
-  ];
-  
   const foundProjects = new Set<string>();
-  
-  for (const pattern of projectPatterns) {
-    let match;
-    // Reset lastIndex for each pattern (important for /g flag)
-    pattern.lastIndex = 0;
-    while ((match = pattern.exec(content)) !== null) {
-      const projectName = match[1]?.trim();
-      // Filter: must start with uppercase, be 3-40 chars, not a stopword
-      if (projectName && 
-          projectName.length >= 3 && 
-          projectName.length <= 40 &&
-          /^[A-Z]/.test(projectName) &&
-          !stopwords.has(projectName.toLowerCase())) {
-        foundProjects.add(projectName);
-      }
+
+  // Known project patterns that are definitely projects
+  // Pattern 1: "working on/project/developing ProjectName" - explicit project mentions
+  const explicitProjectPattern = /(?:working on|project:|developing|implementing|building)\s+(?:the\s+)?["']?([A-Z][a-zA-Z0-9_-]{2,30})["']?/g;
+  let match;
+  while ((match = explicitProjectPattern.exec(content)) !== null) {
+    const projectName = match[1]?.trim();
+    if (projectName && projectName.length >= 3 && projectName.length <= 40) {
+      foundProjects.add(projectName);
     }
   }
-  
-  // Also look for specific code/repo references (these are more reliable)
-  const repoPattern = /(?:repository|repo|codebase)\s*[:\-]?\s*["']?([a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)?)/gi;
+
+  // Pattern 2: Bold project names (often markdown formatting for project names)
+  const boldPattern = /\*\*([A-Z][a-zA-Z0-9_-]{2,30})\*\*(?:\s+(?:project|app|system|manager|dashboard))?/gi;
+  while ((match = boldPattern.exec(content)) !== null) {
+    const projectName = match[1]?.trim();
+    // Only if it looks like a project (has keywords nearby or is compound)
+    if (projectName && projectName.length >= 3 && projectName.length <= 40 && projectName.includes('-')) {
+      foundProjects.add(projectName);
+    }
+  }
+
+  // Pattern 3: Code/repo references (these are definitely projects)
+  const repoPattern = /(?:repository|repo|codebase|github|gitlab)\s*[:\-]?\s*["']?([a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)?)["']?/gi;
   let repoMatch;
   while ((repoMatch = repoPattern.exec(content)) !== null) {
     const repoName = repoMatch[1]?.trim();
-    if (repoName && repoName.length >= 3 && !stopwords.has(repoName.toLowerCase())) {
+    if (repoName && repoName.length >= 3 && repoName.length <= 40) {
       foundProjects.add(repoName);
     }
   }
-  
-  // Look for Alfie-specific patterns
-  const alfiePattern = /Alfie[-\s]?(?:Business[-\s]?Manager|Agent|[A-Z][a-zA-Z0-9-]*)/gi;
-  let alfieMatch;
-  while ((alfieMatch = alfiePattern.exec(content)) !== null) {
-    foundProjects.add(alfieMatch[0].replace(/\s+/g, '-'));
+
+  // Pattern 4: Known projects (curated list - common sense real projects)
+  const knownProjects = [
+    'Alfie', 'Alfie-Business-Manager', 'Alfie Business Manager',
+    'Graphiti', 'Pieces', 'Neo4j', 'Linear', 'Notion',
+    'React', 'Node', 'Python', 'TypeScript', 'Vite'
+  ];
+
+  const knownLowerSet = new Set(knownProjects.map(p => p.toLowerCase()));
+
+  for (const project of knownProjects) {
+    if (content.toLowerCase().includes(project.toLowerCase())) {
+      foundProjects.add(project);
+    }
   }
-  
+
+  // Add found projects, tracking activity count
   foundProjects.forEach(projectName => {
     if (!activeProjects.has(projectName)) {
       activeProjects.set(projectName, {
@@ -480,12 +474,78 @@ export function getUserNotes(): string {
   }
 }
 
-export function saveUserNotes(notes: string): void {
+export async function saveUserNotes(notes: string): Promise<void> {
   try {
+    // Save to localStorage
     localStorage.setItem(NOTES_STORAGE_KEY, notes);
+
+    // Also save to knowledge graph so Alfie can consider it in responses
+    if (notes.trim().length > 0) {
+      try {
+        const response = await fetch('http://localhost:3002/api/graph/episode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: `USER NOTES: ${notes}`,
+            source: 'alfie_user_notes',
+            episode_type: 'message'
+          })
+        });
+
+        if (!response.ok) {
+          console.warn('Failed to save notes to knowledge graph:', response.status);
+        }
+      } catch (error) {
+        console.warn('Failed to sync notes to knowledge graph:', error);
+        // Don't throw - local save already succeeded
+      }
+    }
   } catch (e) {
     console.error('Failed to save user notes:', e);
   }
+}
+
+// ============================================================================
+// PROJECT ACTIVITY ENHANCEMENT
+// ============================================================================
+
+/**
+ * Enhance project activity counts by looking for project mentions across Linear and Notion.
+ * This creates a heatmap effect where heavily used projects across multiple sources get higher counts.
+ */
+function enhanceProjectActivityFromSources(
+  activeProjects: Map<string, ActiveProject>,
+  linearIssues: LinearIssueData[],
+  notionPages: NotionPage[]
+): void {
+  // Known projects to look for
+  const projectNames = Array.from(activeProjects.keys());
+
+  // Scan Linear issues for project mentions
+  linearIssues.forEach(issue => {
+    projectNames.forEach(projectName => {
+      const projectLower = projectName.toLowerCase();
+      const issueText = `${issue.title} ${issue.project || ''}`.toLowerCase();
+
+      if (issueText.includes(projectLower)) {
+        const project = activeProjects.get(projectName)!;
+        project.activityCount += 2; // Weight Linear mentions as +2
+      }
+    });
+  });
+
+  // Scan Notion pages for project mentions
+  notionPages.forEach(page => {
+    projectNames.forEach(projectName => {
+      const projectLower = projectName.toLowerCase();
+      const pageText = `${page.title} ${page.content || ''}`.toLowerCase();
+
+      if (pageText.includes(projectLower)) {
+        const project = activeProjects.get(projectName)!;
+        project.activityCount += 1; // Weight Notion mentions as +1
+      }
+    });
+  });
 }
 
 // ============================================================================
@@ -519,9 +579,12 @@ export async function generateIntelligenceDossier(forceRefresh = false): Promise
 
   // Extract Linear issues
   const linearIssues: LinearIssueData[] = fullData.linear?.issues || [];
-  
+
   // Extract Notion pages
   const notionPages: NotionPage[] = fullData.notion?.pages || [];
+
+  // Boost project activity counts based on mentions across all sources (Linear, Notion, etc.)
+  enhanceProjectActivityFromSources(activeProjects, linearIssues, notionPages);
 
   // Build raw context for Alfie (now includes all sources)
   const rawContext = buildRawContext(summaries, events, decisions, linearIssues, notionPages);
