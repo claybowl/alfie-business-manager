@@ -5,7 +5,10 @@
       "Skill(mcp-builder)",
       "WebFetch(domain:localhost)",
       "Bash(npm install:*)",
-      "Bash(timeout 5s npm start:*)"
+      "Bash(timeout 5s npm start:*)",
+      "Bash(pnpm list:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run dev:*)"
     ],
     "deny": [],
     "ask": []

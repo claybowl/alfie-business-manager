@@ -538,8 +538,22 @@ This is Donjon Intelligence Systems. Agentic systems are our trade. I will see t
           },
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to connect:", error);
+      
+      // Provide helpful error messages
+      if (error instanceof DOMException) {
+        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+          alert("🎤 Microphone access denied.\n\nPlease allow microphone access in your browser settings and try again.");
+        } else if (error.name === 'NotFoundError') {
+          alert("🎤 No microphone found.\n\nPlease connect a microphone and try again.");
+        } else {
+          alert(`Audio error: ${error.message}\n\nPlease check your microphone settings.`);
+        }
+      } else if (error?.message?.includes('API')) {
+        alert(`API Error: ${error.message}\n\nPlease check your Gemini API key in Settings.`);
+      }
+      
       setConnectionState('error');
       stopAudioProcessing();
     }

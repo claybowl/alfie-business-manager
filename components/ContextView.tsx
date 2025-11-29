@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import ForceGraph2D, { ForceGraphMethods } from 'react-force-graph-2d';
-import { forceCollide, forceManyBody, forceLink } from 'd3-force';
+import ForceGraph3D, { ForceGraphMethods } from 'react-force-graph-3d';
+import * as THREE from 'three';
+import { forceCollide, forceManyBody } from 'd3-force';
 import { 
   getGraph, 
   fetchGraphData, 
@@ -20,14 +21,16 @@ import {
 const THEME = {
   // Node colors by group - vibrant neon palette
   nodeColors: {
-    person: { primary: '#ff6b9d', glow: '#ff6b9d80' },      // Hot pink
-    place: { primary: '#00f5d4', glow: '#00f5d480' },       // Cyan
+    person: { primary: '#ff6b9d', glow: '#ff6b9d80' },       // Hot pink
+    place: { primary: '#00f5d4', glow: '#00f5d480' },        // Cyan
     organization: { primary: '#fee440', glow: '#fee44080' }, // Yellow
-    concept: { primary: '#9b5de5', glow: '#9b5de580' },     // Purple
-    object: { primary: '#00bbf9', glow: '#00bbf980' },      // Blue
-    event: { primary: '#f15bb5', glow: '#f15bb580' },       // Magenta
-    Entity: { primary: '#00f5d4', glow: '#00f5d480' },      // Default cyan
-    default: { primary: '#8b8b8b', glow: '#8b8b8b40' }      // Gray
+    concept: { primary: '#9b5de5', glow: '#9b5de580' },      // Purple
+    object: { primary: '#00bbf9', glow: '#00bbf980' },       // Blue
+    event: { primary: '#f15bb5', glow: '#f15bb580' },        // Magenta
+    tool: { primary: '#00ff88', glow: '#00ff8880' },         // Neon green
+    project: { primary: '#ff9f1c', glow: '#ff9f1c80' },      // Orange
+    Entity: { primary: '#6c757d', glow: '#6c757d40' },       // Gray (fallback)
+    default: { primary: '#6c757d', glow: '#6c757d40' }       // Gray
   },
   // Link colors
   link: {
@@ -57,9 +60,111 @@ const NODE_ICONS: Record<string, string> = {
   concept: '💡',
   object: '📦',
   event: '📅',
+  tool: '🔧',
+  project: '📁',
   Entity: '◈',
   default: '◈'
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INTELLIGENT TYPE INFERENCE - Assign semantic types based on entity content
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Known entities for quick lookup
+const KNOWN_ENTITIES: Record<string, string> = {
+  // People
+  'clay': 'person',
+  'alfie': 'person',
+  'alfie solomons': 'person',
+  'user': 'person',
+  'assistant': 'person',
+  
+  // Places
+  'washington dc': 'place',
+  'washington': 'place',
+  'london': 'place',
+  'birmingham': 'place',
+  
+  // Organizations
+  'donjon intelligence systems': 'organization',
+  'donjon': 'organization',
+  'peaky blinders': 'organization',
+  
+  // Tools & Tech
+  'neo4j': 'tool',
+  'graphiti': 'tool',
+  'pieces os': 'tool',
+  'pieces': 'tool',
+  'linear': 'tool',
+  'notion': 'tool',
+  'vercel': 'tool',
+  'react': 'tool',
+  'python': 'tool',
+  'node': 'tool',
+  'typescript': 'tool',
+  
+  // Projects
+  'alfie business manager': 'project',
+  'alfie business manager project': 'project',
+};
+
+// Patterns for type inference
+const TYPE_PATTERNS: { pattern: RegExp; type: string }[] = [
+  // Tools & Tech (check first - specific patterns)
+  { pattern: /\b(api|sdk|app|tool|software|platform|service|database|server|client|library|framework|ai|llm|gpt|claude)\b/i, type: 'tool' },
+  { pattern: /\.(js|ts|py|go|rs|java|jsx|tsx)$/i, type: 'tool' },
+  
+  // Projects
+  { pattern: /\b(project|app|application|system|manager|dashboard)\b/i, type: 'project' },
+  
+  // Organizations
+  { pattern: /\b(inc|llc|corp|company|org|organization|team|group|department|agency|firm|institute|systems)\b/i, type: 'organization' },
+  
+  // Places
+  { pattern: /\b(city|town|country|state|street|avenue|building|office|location|dc|nyc|la|sf)\b/i, type: 'place' },
+  
+  // Events
+  { pattern: /\b(meeting|event|call|session|conversation|discussion|interview|presentation)\b/i, type: 'event' },
+  
+  // Concepts (abstract ideas)
+  { pattern: /\b(concept|idea|strategy|plan|goal|vision|mission|value|principle|theory|method|process|workflow|memory|knowledge|context)\b/i, type: 'concept' },
+];
+
+// Infer entity type from name and summary
+function inferEntityType(name: string, summary?: string): string {
+  const nameLower = name.toLowerCase().trim();
+  
+  // Check known entities first
+  if (KNOWN_ENTITIES[nameLower]) {
+    return KNOWN_ENTITIES[nameLower];
+  }
+  
+  // Check patterns
+  const textToAnalyze = `${name} ${summary || ''}`;
+  for (const { pattern, type } of TYPE_PATTERNS) {
+    if (pattern.test(textToAnalyze)) {
+      return type;
+    }
+  }
+  
+  // Heuristic: Single capitalized words that look like names → person
+  if (/^[A-Z][a-z]+$/.test(name) && name.length > 2 && name.length < 15) {
+    return 'person';
+  }
+  
+  // Heuristic: Multiple capitalized words → likely person or organization
+  if (/^[A-Z][a-z]+(\s+[A-Z][a-z]+)+$/.test(name)) {
+    // If it's 2-3 words, probably a person
+    const words = name.split(/\s+/);
+    if (words.length <= 3) {
+      return 'person';
+    }
+    return 'organization';
+  }
+  
+  // Default to concept for abstract terms
+  return 'concept';
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // COMPONENT
@@ -190,24 +295,27 @@ export const ContextView: React.FC = () => {
     };
   }, [graphData]);
 
-  // Particle animation loop
+  // Particle animation loop - trigger re-render via state update
+  const [particleTick, setParticleTick] = useState(0);
+  
   useEffect(() => {
-    if (!showParticles) return;
+    if (!showParticles || graphData.links.length === 0) return;
     
     const animate = () => {
-      particlesRef.current.forEach((particles, key) => {
+      particlesRef.current.forEach((particles) => {
         particles.forEach(p => {
           p.progress += p.speed;
           if (p.progress > 1) p.progress = 0;
         });
       });
-      graphRef.current?.refresh();
+      // Trigger canvas redraw by updating tick
+      setParticleTick(t => (t + 1) % 1000);
       animationRef.current = requestAnimationFrame(animate);
     };
     
     animationRef.current = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationRef.current);
-  }, [showParticles, graphData]);
+  }, [showParticles, graphData.links.length]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // HELPERS
@@ -224,8 +332,19 @@ export const ContextView: React.FC = () => {
     return connected;
   }, [graphData.links]);
 
-  const getNodeColor = useCallback((group: string) => {
-    return THEME.nodeColors[group as keyof typeof THEME.nodeColors] || THEME.nodeColors.default;
+  const getNodeColor = useCallback((node: Node | string) => {
+    // If passed a node object, infer the type
+    if (typeof node === 'object') {
+      const inferredType = inferEntityType(node.id, node.summary);
+      return THEME.nodeColors[inferredType as keyof typeof THEME.nodeColors] || THEME.nodeColors.default;
+    }
+    // If passed a string (group name), use it directly
+    return THEME.nodeColors[node as keyof typeof THEME.nodeColors] || THEME.nodeColors.default;
+  }, []);
+  
+  // Get inferred type for a node (for display)
+  const getNodeType = useCallback((node: Node): string => {
+    return inferEntityType(node.id, node.summary);
   }, []);
 
   // Search handler
@@ -254,8 +373,17 @@ export const ContextView: React.FC = () => {
   // Focus on a specific node
   const focusNode = useCallback((nodeId: string) => {
     const node = graphData.nodes.find(n => n.id === nodeId);
-    if (node && graphRef.current && node.x !== undefined && node.y !== undefined) {
-      graphRef.current.centerAt(node.x, node.y, 500);
+    if (node && graphRef.current) {
+      // Use camera controls to focus on the node position
+      const targetZ = node.z !== undefined ? node.z : 0;
+      graphRef.current.cameraPosition({
+        x: node.x || 0,
+        y: node.y || 0,
+        z: targetZ + 50 // Position camera slightly away from node
+      },
+      { x: node.x || 0, y: node.y || 0, z: targetZ }, // Look at the node
+      1000 // Animation duration
+      );
       graphRef.current.zoom(2, 500);
       setSelectedNode(nodeId);
       setSearchQuery('');
@@ -328,6 +456,59 @@ export const ContextView: React.FC = () => {
       });
       saveNodePositions(graphData.nodes);
     }, 1000);
+  }, [graphData.nodes]);
+
+  // Handle spreading nodes out
+  const handleSpreadNodes = useCallback(() => {
+    if (!graphRef.current) return;
+
+    const graph = graphRef.current;
+
+    // Clear frozen positions to re-enable physics (add z-coordinate for 3D)
+    graphData.nodes.forEach(node => {
+      node.fx = undefined;
+      node.fy = undefined;
+      node.fz = undefined;
+    });
+
+    // Increase forces for better spreading
+    graph.d3Force('charge', forceManyBody().strength(-500).distanceMax(600));
+    graph.d3Force('link')?.distance(150);
+    graph.d3Force('center')?.strength(0.01);
+
+    // Enhanced collision for bouncing
+    graph.d3Force('collide', forceCollide()
+      .radius(40)
+      .strength(1.2)
+      .iterations(5)
+    );
+
+    // Reheat simulation and run longer
+    setIsSimulationRunning(true);
+    graph.d3ReheatSimulation();
+    graph.cooldownTicks(300);
+
+    // Auto-freeze after 6 seconds to let nodes settle
+    setTimeout(() => {
+      setIsSimulationRunning(false);
+      graphData.nodes.forEach(node => {
+        if (node.x !== undefined && node.y !== undefined) {
+          node.fx = node.x;
+          node.fy = node.y;
+          node.fz = 0; // Center z-coordinate
+        }
+      });
+      saveNodePositions(graphData.nodes);
+      // Reset forces to original values
+      graph.d3Force('charge', forceManyBody().strength(-300).distanceMax(400));
+      graph.d3Force('link')?.distance(120);
+      graph.d3Force('center')?.strength(0.03);
+      graph.d3Force('collide', forceCollide()
+        .radius(35)
+        .strength(0.8)
+        .iterations(3)
+      );
+    }, 6000);
   }, [graphData.nodes]);
 
   const handleBackgroundClick = useCallback(() => {
@@ -444,12 +625,20 @@ export const ContextView: React.FC = () => {
           </button>
           
           {hasData && (
-            <button
-              onClick={() => graphRef.current?.zoomToFit(400, 80)}
-              className="px-3 py-1.5 bg-gray-800/50 text-gray-300 border border-gray-700/50 rounded text-xs font-mono hover:bg-gray-700/50 transition-all"
-            >
-              ◎ FIT
-            </button>
+            <>
+              <button
+                onClick={handleSpreadNodes}
+                className="px-3 py-1.5 bg-purple-800/50 text-purple-300 border border-purple-700/50 rounded text-xs font-mono hover:bg-purple-700/50 transition-all"
+              >
+                ⚡ SPREAD
+              </button>
+              <button
+                onClick={() => graphRef.current?.zoomToFit(400, 80)}
+                className="px-3 py-1.5 bg-gray-800/50 text-gray-300 border border-gray-700/50 rounded text-xs font-mono hover:bg-gray-700/50 transition-all"
+              >
+                ◎ FIT
+              </button>
+            </>
           )}
           
           <button
@@ -479,249 +668,91 @@ export const ContextView: React.FC = () => {
         >
           {hasData ? (
             <>
-              <ForceGraph2D
+              <ForceGraph3D
                 ref={graphRef}
                 width={dimensions.width - (selectedNodeData ? 320 : 0)}
                 height={dimensions.height}
                 graphData={graphData}
-                
+
                 // Simulation
                 cooldownTicks={isSimulationRunning ? 200 : 0}
                 d3AlphaDecay={0.015}
                 d3VelocityDecay={0.3}
-                
-                // Interaction
+
+                // 3D Settings
+                backgroundColor="#0a0a0f"
+                showNavInfo={false}
+
+                // 3D Interaction
                 enableNodeDrag={true}
-                enablePanInteraction={true}
-                enableZoomInteraction={true}
-                
-                // Custom node rendering
-                nodeCanvasObject={(node, ctx, globalScale) => {
+                enableZoom={true}
+                enablePan={true}
+                enableRotate={true}
+                autoRotate={false}
+                autoRotateSpeed={1}
+
+                // Camera controls
+                cameraPosition={{ x: 0, y: 0, z: 300 }}
+
+                // Simple spiral/brain-shaped hollow outlines
+                nodeThreeObject={(node) => {
                   const n = node as Node;
-                  if (n.x === undefined || n.y === undefined) return;
-                  
-                  const colors = getNodeColor(n.group);
+                  const colors = getNodeColor(n);
                   const isHighlighted = highlightedNodes.size === 0 || highlightedNodes.has(n.id);
                   const isSelected = selectedNode === n.id;
                   const isHovered = hoveredNode === n.id;
-                  const isSearchResult = searchResults.includes(n.id);
-                  
-                  const baseRadius = 12;
-                  const radius = isSelected ? baseRadius * 1.4 : isHovered ? baseRadius * 1.2 : baseRadius;
-                  const alpha = isHighlighted ? 1 : 0.2;
-                  
-                  // Outer glow
+
+                  const baseRadius = isSelected ? 6 : isHovered ? 5 : 4;
+
+                  // Create spiral shape using tube geometry
+                  const curve = new THREE.CatmullRomCurve3([
+                    new THREE.Vector3(-baseRadius, 0, 0),
+                    new THREE.Vector3(-baseRadius * 0.5, baseRadius * 0.5, 0),
+                    new THREE.Vector3(0, 0, baseRadius * 0.5),
+                    new THREE.Vector3(baseRadius * 0.5, baseRadius * 0.5, 0),
+                    new THREE.Vector3(baseRadius, 0, 0),
+                    new THREE.Vector3(baseRadius * 0.5, -baseRadius * 0.5, 0),
+                    new THREE.Vector3(0, 0, -baseRadius * 0.5),
+                    new THREE.Vector3(-baseRadius * 0.5, -baseRadius * 0.5, 0),
+                    new THREE.Vector3(-baseRadius, 0, 0)
+                  ]);
+
+                  const geometry = new THREE.TubeGeometry(curve, 20, 0.8, 8, false);
+
+                  // Simple neon outline material
+                  const material = new THREE.MeshBasicMaterial({
+                    color: colors.primary,
+                    transparent: true,
+                    opacity: isHighlighted ? 0.9 : 0.6,
+                    wireframe: true,
+                    wireframeLinewidth: 1
+                  });
+
+                  const spiral = new THREE.Mesh(geometry, material);
+
+                  // Add a small glowing center point for emphasis
                   if (isHighlighted) {
-                    const gradient = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, radius * 3);
-                    gradient.addColorStop(0, colors.glow);
-                    gradient.addColorStop(1, 'transparent');
-                    ctx.fillStyle = gradient;
-                    ctx.beginPath();
-                    ctx.arc(n.x, n.y, radius * 3, 0, 2 * Math.PI);
-                    ctx.fill();
-                  }
-                  
-                  // Selection ring
-                  if (isSelected || isSearchResult) {
-                    ctx.strokeStyle = isSearchResult ? '#fee440' : colors.primary;
-                    ctx.lineWidth = 2;
-                    ctx.setLineDash([4, 4]);
-                    ctx.beginPath();
-                    ctx.arc(n.x, n.y, radius + 6, 0, 2 * Math.PI);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                  }
-                  
-                  // Node body with gradient
-                  const bodyGradient = ctx.createRadialGradient(
-                    n.x - radius * 0.3, n.y - radius * 0.3, 0,
-                    n.x, n.y, radius
-                  );
-                  bodyGradient.addColorStop(0, '#ffffff30');
-                  bodyGradient.addColorStop(0.5, colors.primary);
-                  bodyGradient.addColorStop(1, colors.primary + '80');
-                  
-                  ctx.globalAlpha = alpha;
-                  ctx.fillStyle = bodyGradient;
-                  ctx.beginPath();
-                  ctx.arc(n.x, n.y, radius, 0, 2 * Math.PI);
-                  ctx.fill();
-                  
-                  // Inner highlight
-                  ctx.fillStyle = 'rgba(255,255,255,0.2)';
-                  ctx.beginPath();
-                  ctx.arc(n.x - radius * 0.25, n.y - radius * 0.25, radius * 0.4, 0, 2 * Math.PI);
-                  ctx.fill();
-                  ctx.globalAlpha = 1;
-                  
-                  // Label
-                  if (isHighlighted || globalScale > 0.8) {
-                    const label = n.id;
-                    const fontSize = Math.max(10, Math.min(14, 14 / globalScale));
-                    ctx.font = `600 ${fontSize}px "Inter", "SF Pro Display", system-ui, sans-serif`;
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    
-                    const textWidth = ctx.measureText(label).width;
-                    const padding = 6;
-                    const labelY = n.y + radius + fontSize + 4;
-                    
-                    // Label background
-                    ctx.fillStyle = 'rgba(10, 10, 15, 0.9)';
-                    ctx.beginPath();
-                    ctx.roundRect(
-                      n.x - textWidth / 2 - padding,
-                      labelY - fontSize / 2 - padding / 2,
-                      textWidth + padding * 2,
-                      fontSize + padding,
-                      4
-                    );
-                    ctx.fill();
-                    
-                    // Label border
-                    ctx.strokeStyle = isSelected ? colors.primary : 'rgba(0, 245, 212, 0.3)';
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
-                    
-                    // Label text
-                    ctx.fillStyle = isSelected ? colors.primary : (isHighlighted ? '#ffffff' : '#888888');
-                    ctx.fillText(label, n.x, labelY);
-                  }
-                }}
-                nodePointerAreaPaint={(node, color, ctx) => {
-                  const n = node as Node;
-                  if (n.x === undefined || n.y === undefined) return;
-                  ctx.fillStyle = color;
-                  ctx.beginPath();
-                  ctx.arc(n.x, n.y, 20, 0, 2 * Math.PI);
-                  ctx.fill();
-                }}
-                
-                // Custom link rendering with particles
-                linkCanvasObject={(link, ctx, globalScale) => {
-                  const l = link as Link;
-                  const source = l.source as any;
-                  const target = l.target as any;
-                  
-                  if (!source.x || !target.x) return;
-                  
-                  const sourceId = typeof l.source === 'object' ? (l.source as Node).id : l.source;
-                  const targetId = typeof l.target === 'object' ? (l.target as Node).id : l.target;
-                  
-                  const isHighlighted = highlightedNodes.size === 0 || 
-                    (highlightedNodes.has(sourceId as string) && highlightedNodes.has(targetId as string));
-                  
-                  // Draw curved link
-                  const dx = target.x - source.x;
-                  const dy = target.y - source.y;
-                  const dr = Math.sqrt(dx * dx + dy * dy);
-                  
-                  // Calculate control point for curve
-                  const midX = (source.x + target.x) / 2;
-                  const midY = (source.y + target.y) / 2;
-                  const curvature = 0.2;
-                  const ctrlX = midX - dy * curvature;
-                  const ctrlY = midY + dx * curvature;
-                  
-                  // Link gradient
-                  const gradient = ctx.createLinearGradient(source.x, source.y, target.x, target.y);
-                  const sourceColor = getNodeColor(source.group || 'default').primary;
-                  const targetColor = getNodeColor(target.group || 'default').primary;
-                  
-                  if (isHighlighted) {
-                    gradient.addColorStop(0, sourceColor + '80');
-                    gradient.addColorStop(0.5, 'rgba(0, 245, 212, 0.6)');
-                    gradient.addColorStop(1, targetColor + '80');
-                  } else {
-                    gradient.addColorStop(0, 'rgba(0, 245, 212, 0.08)');
-                    gradient.addColorStop(1, 'rgba(0, 245, 212, 0.08)');
-                  }
-                  
-                  ctx.strokeStyle = gradient;
-                  ctx.lineWidth = isHighlighted ? 2 : 1;
-                  ctx.beginPath();
-                  ctx.moveTo(source.x, source.y);
-                  ctx.quadraticCurveTo(ctrlX, ctrlY, target.x, target.y);
-                  ctx.stroke();
-                  
-                  // Arrow
-                  if (isHighlighted) {
-                    const angle = Math.atan2(target.y - ctrlY, target.x - ctrlX);
-                    const arrowLength = 8;
-                    const arrowX = target.x - Math.cos(angle) * 15;
-                    const arrowY = target.y - Math.sin(angle) * 15;
-                    
-                    ctx.fillStyle = targetColor;
-                    ctx.beginPath();
-                    ctx.moveTo(arrowX, arrowY);
-                    ctx.lineTo(
-                      arrowX - arrowLength * Math.cos(angle - Math.PI / 6),
-                      arrowY - arrowLength * Math.sin(angle - Math.PI / 6)
-                    );
-                    ctx.lineTo(
-                      arrowX - arrowLength * Math.cos(angle + Math.PI / 6),
-                      arrowY - arrowLength * Math.sin(angle + Math.PI / 6)
-                    );
-                    ctx.closePath();
-                    ctx.fill();
-                  }
-                  
-                  // Flowing particles
-                  if (showParticles && isHighlighted) {
-                    const key = `${sourceId}-${targetId}`;
-                    const particles = particlesRef.current.get(key) || [];
-                    
-                    particles.forEach(p => {
-                      // Calculate position along quadratic curve
-                      const t = p.progress;
-                      const x = (1-t)*(1-t)*source.x + 2*(1-t)*t*ctrlX + t*t*target.x;
-                      const y = (1-t)*(1-t)*source.y + 2*(1-t)*t*ctrlY + t*t*target.y;
-                      
-                      // Particle glow
-                      const particleGradient = ctx.createRadialGradient(x, y, 0, x, y, 6);
-                      particleGradient.addColorStop(0, '#00f5d4');
-                      particleGradient.addColorStop(1, 'transparent');
-                      ctx.fillStyle = particleGradient;
-                      ctx.beginPath();
-                      ctx.arc(x, y, 6, 0, 2 * Math.PI);
-                      ctx.fill();
-                      
-                      // Particle core
-                      ctx.fillStyle = '#ffffff';
-                      ctx.beginPath();
-                      ctx.arc(x, y, 2, 0, 2 * Math.PI);
-                      ctx.fill();
+                    const coreGeometry = new THREE.SphereGeometry(0.5, 8, 8);
+                    const coreMaterial = new THREE.MeshBasicMaterial({
+                      color: colors.primary,
+                      transparent: true,
+                      opacity: 0.8
                     });
+                    const core = new THREE.Mesh(coreGeometry, coreMaterial);
+                    spiral.add(core);
                   }
-                  
-                  // Relationship label
-                  if (isHighlighted && l.value && (selectedNode || globalScale > 1.2)) {
-                    const labelX = midX;
-                    const labelY = midY - 8;
-                    
-                    const fontSize = Math.max(9, 11 / globalScale);
-                    ctx.font = `500 ${fontSize}px "Inter", system-ui, sans-serif`;
-                    const textWidth = ctx.measureText(l.value).width;
-                    
-                    // Background
-                    ctx.fillStyle = 'rgba(10, 10, 15, 0.95)';
-                    ctx.beginPath();
-                    ctx.roundRect(labelX - textWidth / 2 - 6, labelY - fontSize / 2 - 3, textWidth + 12, fontSize + 6, 3);
-                    ctx.fill();
-                    
-                    ctx.strokeStyle = 'rgba(0, 245, 212, 0.4)';
-                    ctx.lineWidth = 1;
-                    ctx.stroke();
-                    
-                    // Text
-                    ctx.fillStyle = '#00f5d4';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(l.value, labelX, labelY);
-                  }
+
+                  return spiral;
                 }}
-                linkCanvasObjectMode={() => 'replace'}
-                
+
+                // Links with glow effect
+                linkColor={() => '#00f5d440'}
+                linkWidth={1}
+                linkDirectionalParticles={showParticles ? 2 : 0}
+                linkDirectionalParticleSpeed={0.005}
+                linkDirectionalParticleWidth={2}
+                linkDirectionalParticleColor={() => '#00f5d4'}
+
                 // Events
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
@@ -730,12 +761,11 @@ export const ContextView: React.FC = () => {
                 onNodeDragEnd={handleNodeDragEnd}
                 onBackgroundClick={handleBackgroundClick}
               />
-              
-              {/* Vignette overlay */}
-              <div 
-                className="absolute inset-0 pointer-events-none"
-                style={{ background: 'radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.5) 100%)' }}
-              />
+
+              {/* 3D overlay info */}
+              <div className="absolute top-4 left-4 text-xs text-gray-400 font-mono bg-black/50 px-3 py-2 rounded">
+                🖱️ Left click + drag: Rotate • Right click + drag: Pan • Scroll: Zoom
+              </div>
             </>
           ) : isLoading ? (
             <div className="absolute inset-0 flex items-center justify-center">
@@ -769,13 +799,22 @@ export const ContextView: React.FC = () => {
           <div className="w-80 bg-[#0d1117] border-l border-cyan-900/30 overflow-y-auto">
             <div className="p-4 border-b border-cyan-900/30">
               <div className="flex items-center gap-3">
-                <span className="text-2xl">
-                  {NODE_ICONS[selectedNodeData.node.group] || NODE_ICONS.default}
-                </span>
+                <div 
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-xl"
+                  style={{ 
+                    backgroundColor: getNodeColor(selectedNodeData.node).primary + '30',
+                    border: `2px solid ${getNodeColor(selectedNodeData.node).primary}`
+                  }}
+                >
+                  {NODE_ICONS[getNodeType(selectedNodeData.node)] || NODE_ICONS.default}
+                </div>
                 <div>
                   <h3 className="text-lg font-medium text-white">{selectedNodeData.node.id}</h3>
-                  <p className="text-xs text-cyan-400/60 uppercase tracking-wider">
-                    {selectedNodeData.node.group}
+                  <p 
+                    className="text-xs uppercase tracking-wider"
+                    style={{ color: getNodeColor(selectedNodeData.node).primary }}
+                  >
+                    {getNodeType(selectedNodeData.node)}
                   </p>
                 </div>
               </div>
@@ -827,12 +866,19 @@ export const ContextView: React.FC = () => {
           <span><kbd className="text-cyan-400">Click</kbd> Select node</span>
           <span><kbd className="text-cyan-400">Drag</kbd> Move nodes</span>
           <span><kbd className="text-cyan-400">Scroll</kbd> Zoom</span>
-          <span><kbd className="text-cyan-400">Pan</kbd> Move view</span>
+          <span><kbd className="text-cyan-400">Right-click + Drag</kbd> Rotate</span>
+          <span><kbd className="text-cyan-400">Middle-click + Drag</kbd> Pan</span>
         </div>
         <div className="flex gap-4">
-          {Object.entries(THEME.nodeColors).slice(0, 5).map(([type, colors]) => (
+          {['person', 'organization', 'place', 'tool', 'project', 'concept'].map(type => (
             <div key={type} className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: colors.primary }} />
+              <span 
+                className="w-2.5 h-2.5 rounded-full" 
+                style={{ 
+                  backgroundColor: THEME.nodeColors[type as keyof typeof THEME.nodeColors].primary,
+                  boxShadow: `0 0 6px ${THEME.nodeColors[type as keyof typeof THEME.nodeColors].primary}`
+                }} 
+              />
               <span className="capitalize">{type}</span>
             </div>
           ))}

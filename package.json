@@ -13,7 +13,8 @@
     "d3-force": "^3.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-force-graph-2d": "latest"
+    "react-force-graph-2d": "latest",
+    "react-force-graph-3d": "^1.29.0"
   },
   "devDependencies": {
     "@types/d3-force": "^3.0.10",
