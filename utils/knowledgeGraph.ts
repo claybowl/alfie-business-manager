@@ -27,7 +27,7 @@ export interface KnowledgeGraphData {
   links: Link[];
 }
 
-const BACKEND_URL = 'http://localhost:3002';
+const BACKEND_URL = 'http://localhost:8000';
 const POSITION_STORAGE_KEY = 'alfie-graph-positions'; // Local storage for visual positions only
 
 // Cache for graph data to avoid excessive API calls

@@ -9,7 +9,7 @@ import EventSource from 'eventsource';
 global.EventSource = EventSource;
 
 const app = express();
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 8000;
 const PIECES_SSE_URL = 'http://localhost:39300/model_context_protocol/2024-11-05/sse';
 
 // API Keys (loaded from environment variables)
@@ -17,7 +17,7 @@ const LINEAR_API_KEY = process.env.LINEAR_API_KEY;
 const NOTION_API_KEY = process.env.NOTION_API_KEY;
 
 // Graphiti Service URL (Python microservice for temporal knowledge graph)
-const GRAPHITI_SERVICE_URL = process.env.GRAPHITI_SERVICE_URL || 'http://localhost:8000';
+const GRAPHITI_SERVICE_URL = process.env.GRAPHITI_SERVICE_URL || 'http://localhost:8500';
 
 if (!LINEAR_API_KEY || !NOTION_API_KEY) {
   console.error('ERROR: Missing required API keys in environment variables');

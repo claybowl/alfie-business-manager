@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import ForceGraph3D, { ForceGraphMethods } from 'react-force-graph-3d';
-import * as THREE from 'three';
+import ForceGraph2D, { ForceGraphMethods } from 'react-force-graph-2d';
 import { forceCollide, forceManyBody } from 'd3-force';
 import { 
   getGraph, 
@@ -181,6 +180,8 @@ export const ContextView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [showParticles, setShowParticles] = useState(true);
+  const [showLinkLabels, setShowLinkLabels] = useState(false);
+  const [showLinks, setShowLinks] = useState(true);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraphMethods | undefined>();
@@ -374,16 +375,8 @@ export const ContextView: React.FC = () => {
   const focusNode = useCallback((nodeId: string) => {
     const node = graphData.nodes.find(n => n.id === nodeId);
     if (node && graphRef.current) {
-      // Use camera controls to focus on the node position
-      const targetZ = node.z !== undefined ? node.z : 0;
-      graphRef.current.cameraPosition({
-        x: node.x || 0,
-        y: node.y || 0,
-        z: targetZ + 50 // Position camera slightly away from node
-      },
-      { x: node.x || 0, y: node.y || 0, z: targetZ }, // Look at the node
-      1000 // Animation duration
-      );
+      // Use 2D center and zoom controls
+      graphRef.current.centerAt(node.x || 0, node.y || 0, 500);
       graphRef.current.zoom(2, 500);
       setSelectedNode(nodeId);
       setSearchQuery('');
@@ -464,11 +457,10 @@ export const ContextView: React.FC = () => {
 
     const graph = graphRef.current;
 
-    // Clear frozen positions to re-enable physics (add z-coordinate for 3D)
+    // Clear frozen positions to re-enable physics
     graphData.nodes.forEach(node => {
       node.fx = undefined;
       node.fy = undefined;
-      node.fz = undefined;
     });
 
     // Increase forces for better spreading
@@ -495,7 +487,6 @@ export const ContextView: React.FC = () => {
         if (node.x !== undefined && node.y !== undefined) {
           node.fx = node.x;
           node.fy = node.y;
-          node.fz = 0; // Center z-coordinate
         }
       });
       saveNodePositions(graphData.nodes);
@@ -608,12 +599,34 @@ export const ContextView: React.FC = () => {
           <button
             onClick={() => setShowParticles(!showParticles)}
             className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              showParticles 
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
+              showParticles
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
                 : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
             }`}
           >
             ⚡ {showParticles ? 'ON' : 'OFF'}
+          </button>
+
+          <button
+            onClick={() => setShowLinks(!showLinks)}
+            className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
+              showLinks
+                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
+            }`}
+          >
+            🔗 {showLinks ? 'ON' : 'OFF'}
+          </button>
+
+          <button
+            onClick={() => setShowLinkLabels(!showLinkLabels)}
+            className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
+              showLinkLabels
+                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
+            }`}
+          >
+            🔤 {showLinkLabels ? 'LABELS ON' : 'LABELS OFF'}
           </button>
 
           <button
@@ -668,7 +681,7 @@ export const ContextView: React.FC = () => {
         >
           {hasData ? (
             <>
-              <ForceGraph3D
+              <ForceGraph2D
                 ref={graphRef}
                 width={dimensions.width - (selectedNodeData ? 320 : 0)}
                 height={dimensions.height}
@@ -679,79 +692,119 @@ export const ContextView: React.FC = () => {
                 d3AlphaDecay={0.015}
                 d3VelocityDecay={0.3}
 
-                // 3D Settings
+                // 2D Settings
                 backgroundColor="#0a0a0f"
                 showNavInfo={false}
 
-                // 3D Interaction
+                // 2D Interaction
                 enableNodeDrag={true}
                 enableZoom={true}
                 enablePan={true}
-                enableRotate={true}
                 autoRotate={false}
-                autoRotateSpeed={1}
 
-                // Camera controls
-                cameraPosition={{ x: 0, y: 0, z: 300 }}
-
-                // Simple spiral/brain-shaped hollow outlines
-                nodeThreeObject={(node) => {
+                // Wire geometric nodes (adapted for 2D)
+                nodeCanvasObject={(node, ctx, globalScale) => {
                   const n = node as Node;
                   const colors = getNodeColor(n);
                   const isHighlighted = highlightedNodes.size === 0 || highlightedNodes.has(n.id);
                   const isSelected = selectedNode === n.id;
                   const isHovered = hoveredNode === n.id;
 
-                  const baseRadius = isSelected ? 6 : isHovered ? 5 : 4;
+                  const baseRadius = isSelected ? 8 : isHovered ? 6 : 5;
 
-                  // Create spiral shape using tube geometry
-                  const curve = new THREE.CatmullRomCurve3([
-                    new THREE.Vector3(-baseRadius, 0, 0),
-                    new THREE.Vector3(-baseRadius * 0.5, baseRadius * 0.5, 0),
-                    new THREE.Vector3(0, 0, baseRadius * 0.5),
-                    new THREE.Vector3(baseRadius * 0.5, baseRadius * 0.5, 0),
-                    new THREE.Vector3(baseRadius, 0, 0),
-                    new THREE.Vector3(baseRadius * 0.5, -baseRadius * 0.5, 0),
-                    new THREE.Vector3(0, 0, -baseRadius * 0.5),
-                    new THREE.Vector3(-baseRadius * 0.5, -baseRadius * 0.5, 0),
-                    new THREE.Vector3(-baseRadius, 0, 0)
-                  ]);
+                  // Node position
+                  const x = node.x || 0;
+                  const y = node.y || 0;
 
-                  const geometry = new THREE.TubeGeometry(curve, 20, 0.8, 8, false);
+                  ctx.save();
+                  ctx.translate(x, y);
 
-                  // Simple neon outline material
-                  const material = new THREE.MeshBasicMaterial({
-                    color: colors.primary,
-                    transparent: true,
-                    opacity: isHighlighted ? 0.9 : 0.6,
-                    wireframe: true,
-                    wireframeLinewidth: 1
+                  // Create wire geometric shape
+                  ctx.strokeStyle = colors.primary;
+                  ctx.lineWidth = isHighlighted ? 2 : 1;
+                  ctx.globalAlpha = isHighlighted ? 0.9 : 0.6;
+                  ctx.fillStyle = colors.primary;
+
+                  // Draw spiral/geometric pattern
+                  ctx.beginPath();
+                  const points = [
+                    { x: -baseRadius, y: 0 },
+                    { x: -baseRadius * 0.5, y: baseRadius * 0.5 },
+                    { x: 0, y: 0 },
+                    { x: baseRadius * 0.5, y: baseRadius * 0.5 },
+                    { x: baseRadius, y: 0 },
+                    { x: baseRadius * 0.5, y: -baseRadius * 0.5 },
+                    { x: 0, y: 0 },
+                    { x: -baseRadius * 0.5, y: -baseRadius * 0.5 },
+                    { x: -baseRadius, y: 0 }
+                  ];
+
+                  points.forEach((point, i) => {
+                    if (i === 0) {
+                      ctx.moveTo(point.x, point.y);
+                    } else {
+                      ctx.lineTo(point.x, point.y);
+                    }
                   });
 
-                  const spiral = new THREE.Mesh(geometry, material);
+                  ctx.closePath();
+                  ctx.stroke();
 
-                  // Add a small glowing center point for emphasis
+                  // Add inner glow for highlighted nodes
                   if (isHighlighted) {
-                    const coreGeometry = new THREE.SphereGeometry(0.5, 8, 8);
-                    const coreMaterial = new THREE.MeshBasicMaterial({
-                      color: colors.primary,
-                      transparent: true,
-                      opacity: 0.8
-                    });
-                    const core = new THREE.Mesh(coreGeometry, coreMaterial);
-                    spiral.add(core);
+                    ctx.beginPath();
+                    ctx.arc(0, 0, baseRadius * 0.3, 0, 2 * Math.PI);
+                    ctx.globalAlpha = 0.4;
+                    ctx.fill();
                   }
 
-                  return spiral;
+                  ctx.restore();
+                }}
+
+                // Link labels rendering
+                linkCanvasObject={(link, ctx, globalScale) => {
+                  if (!showLinkLabels) return;
+
+                  const source = link.source as Node;
+                  const target = link.target as Node;
+                  const sourceX = source.x || 0;
+                  const sourceY = source.y || 0;
+                  const targetX = target.x || 0;
+                  const targetY = target.y || 0;
+
+                  // Calculate midpoint
+                  const midX = (sourceX + targetX) / 2;
+                  const midY = (sourceY + targetY) / 2;
+
+                  // Only show label if zoomed in enough and link has a value
+                  const linkValue = typeof link.value === 'string' ? link.value : '';
+                  if (!linkValue || globalScale < 0.5) return;
+
+                  ctx.save();
+                  ctx.translate(midX, midY);
+
+                  // Draw label background
+                  ctx.font = '10px monospace';
+                  const textWidth = ctx.measureText(linkValue).width;
+                  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                  ctx.fillRect(-textWidth / 2 - 4, -6, textWidth + 8, 12);
+
+                  // Draw label text
+                  ctx.fillStyle = '#00f5d4';
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillText(linkValue, 0, 0);
+
+                  ctx.restore();
                 }}
 
                 // Links with glow effect
-                linkColor={() => '#00f5d440'}
-                linkWidth={1}
-                linkDirectionalParticles={showParticles ? 2 : 0}
+                linkColor={showLinks ? '#00f5d4' : 'rgba(0,245,212,0)'}
+                linkWidth={showLinks ? 2 : 0}
+                linkDirectionalParticles={showLinks && showParticles ? 2 : 0}
                 linkDirectionalParticleSpeed={0.005}
                 linkDirectionalParticleWidth={2}
-                linkDirectionalParticleColor={() => '#00f5d4'}
+                linkDirectionalParticleColor="#00f5d4"
 
                 // Events
                 onNodeClick={handleNodeClick}
@@ -866,8 +919,8 @@ export const ContextView: React.FC = () => {
           <span><kbd className="text-cyan-400">Click</kbd> Select node</span>
           <span><kbd className="text-cyan-400">Drag</kbd> Move nodes</span>
           <span><kbd className="text-cyan-400">Scroll</kbd> Zoom</span>
-          <span><kbd className="text-cyan-400">Right-click + Drag</kbd> Rotate</span>
-          <span><kbd className="text-cyan-400">Middle-click + Drag</kbd> Pan</span>
+          <span><kbd className="text-cyan-400">Right-click + Drag</kbd> Pan</span>
+          <span><kbd className="text-cyan-400">Double-click</kbd> Fit view</span>
         </div>
         <div className="flex gap-4">
           {['person', 'organization', 'place', 'tool', 'project', 'concept'].map(type => (
