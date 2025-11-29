@@ -180,71 +180,15 @@ export const ContextView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<string[]>([]);
   const [showParticles, setShowParticles] = useState(true);
-  const [showLinkLabels, setShowLinkLabels] = useState(false);
-  const [showLinks, setShowLinks] = useState(true);
-  const [showStraightLines, setShowStraightLines] = useState(false);
-  const [showLineAnimations, setShowLineAnimations] = useState(true);
-  const [abbreviateLabels, setAbbreviateLabels] = useState(false);
+  const [relationshipTextMode, setRelationshipTextMode] = useState<'off' | 'abbrev' | 'full'>('off');
 
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraphMethods | undefined>();
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  
+
   // Particle animation state
   const particlesRef = useRef<Map<string, { progress: number; speed: number }[]>>(new Map());
   const animationRef = useRef<number>(0);
-
-  // Create intelligent abbreviation function
-  const createReadableAbbreviation = (text: string): string => {
-    // List of important words to keep when possible
-    const importantWords = ['is', 'has', 'can', 'will', 'was', 'were', 'are', 'been', 'being', 'have', 'had', 'do', 'does', 'did'];
-    const actionWords = ['relates', 'connects', 'links', 'associated', 'related', 'connected', 'depends', 'requires', 'needs', 'uses', 'contains', 'includes', 'involves', 'affects', 'impacts', 'influences'];
-
-    const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 0);
-
-    if (words.length === 1) {
-      // Single word - just truncate if too long
-      return text.length > 12 ? text.substring(0, 12) + '...' : text;
-    }
-
-    // For multi-word phrases, try to keep meaningful words
-    let result: string[] = [];
-    let length = 0;
-
-    // First, try to keep action words or important short words
-    for (const word of words) {
-      if (length >= 15) break;
-
-      const lowerWord = word.toLowerCase();
-
-      // Keep action words and important words that are short
-      if ((actionWords.includes(lowerWord) || importantWords.includes(lowerWord)) && word.length <= 8) {
-        result.push(word);
-        length += word.length + 1; // +1 for space
-        continue;
-      }
-
-      // For other words, take first few characters
-      if (word.length > 6) {
-        result.push(word.substring(0, 4));
-        length += 4 + 1;
-      } else {
-        result.push(word);
-        length += word.length + 1;
-      }
-    }
-
-    // If result is still too long, be more aggressive
-    let finalResult = result.join(' ');
-    if (finalResult.length > 18) {
-      // Take first letter of each word + keep one meaningful word
-      const importantWord = words.find(w => actionWords.includes(w.toLowerCase()) || w.length <= 4) || words[0];
-      const initials = words.map(w => w[0]).join('').toUpperCase();
-      finalResult = `${importantWord.substring(0, 6)} ${initials}`;
-    }
-
-    return finalResult.trim();
-  };
+  const [particleTick, setParticleTick] = useState(0);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // EFFECTS
@@ -266,8 +210,7 @@ export const ContextView: React.FC = () => {
     const loadGraph = async () => {
       setIsLoading(true);
       try {
-        // Force refresh on initial load to get latest data
-        const data = await fetchGraphData(true);
+        const data = await fetchGraphData();
         setGraphData(data);
         // Initialize particles for each link
         data.links.forEach((link, i) => {
@@ -282,18 +225,38 @@ export const ContextView: React.FC = () => {
       }
       setIsLoading(false);
     };
-    
+
     loadGraph();
-    
+
     const handleUpdate = () => loadGraph();
     window.addEventListener('graphDataUpdated', handleUpdate);
     window.addEventListener('storage', handleUpdate);
-    
+
     return () => {
       window.removeEventListener('graphDataUpdated', handleUpdate);
       window.removeEventListener('storage', handleUpdate);
     };
   }, []);
+
+  // Particle animation loop - trigger re-render via state update
+  useEffect(() => {
+    if (!showParticles || graphData.links.length === 0) return;
+
+    const animate = () => {
+      particlesRef.current.forEach((particles) => {
+        particles.forEach(p => {
+          p.progress += p.speed;
+          if (p.progress > 1) p.progress = 0;
+        });
+      });
+      // Trigger canvas redraw by updating tick
+      setParticleTick(t => (t + 1) % 1000);
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animationRef.current = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationRef.current);
+  }, [showParticles, graphData.links.length]);
 
   // Handle resize
   useEffect(() => {
@@ -305,7 +268,7 @@ export const ContextView: React.FC = () => {
         });
       }
     };
-    
+
     updateDimensions();
     const observer = new ResizeObserver(updateDimensions);
     if (containerRef.current) observer.observe(containerRef.current);
@@ -352,27 +315,6 @@ export const ContextView: React.FC = () => {
     };
   }, [graphData]);
 
-  // Particle animation loop - trigger re-render via state update
-  const [particleTick, setParticleTick] = useState(0);
-  
-  useEffect(() => {
-    if (!showParticles || graphData.links.length === 0) return;
-    
-    const animate = () => {
-      particlesRef.current.forEach((particles) => {
-        particles.forEach(p => {
-          p.progress += p.speed;
-          if (p.progress > 1) p.progress = 0;
-        });
-      });
-      // Trigger canvas redraw by updating tick
-      setParticleTick(t => (t + 1) % 1000);
-      animationRef.current = requestAnimationFrame(animate);
-    };
-    
-    animationRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(animationRef.current);
-  }, [showParticles, graphData.links.length]);
 
   // ─────────────────────────────────────────────────────────────────────────────
   // HELPERS
@@ -404,6 +346,46 @@ export const ContextView: React.FC = () => {
     return inferEntityType(node.id, node.summary);
   }, []);
 
+  // Intelligently abbreviate relationship text
+  const abbreviateRelationship = useCallback((text: string): string => {
+    if (!text) return '';
+
+    // Common relationship verbs - replace with symbols
+    const abbreviations: Record<string, string> = {
+      'relates to': '↔',
+      'mentions': '→',
+      'mentioned by': '←',
+      'creates': '→',
+      'created by': '←',
+      'works on': '→',
+      'works with': '↔',
+      'manages': '→',
+      'managed by': '←',
+      'depends on': '→',
+      'required by': '←',
+      'has': '→',
+      'part of': '←',
+    };
+
+    const lower = text.toLowerCase().trim();
+
+    // Check for exact abbreviation
+    if (abbreviations[lower]) {
+      return abbreviations[lower];
+    }
+
+    // For longer text, use first 2-3 words or shorten to 12 chars max
+    if (text.length > 12) {
+      const words = text.split(/\s+/);
+      if (words.length >= 2) {
+        return words.slice(0, 2).join(' ').substring(0, 12) + '...';
+      }
+      return text.substring(0, 12) + '...';
+    }
+
+    return text;
+  }, []);
+
   // Search handler
   const handleSearch = useCallback(async (query: string) => {
     setSearchQuery(query);
@@ -431,9 +413,8 @@ export const ContextView: React.FC = () => {
   const focusNode = useCallback((nodeId: string) => {
     const node = graphData.nodes.find(n => n.id === nodeId);
     if (node && graphRef.current) {
-      // Use 2D center and zoom controls
-      graphRef.current.centerAt(node.x || 0, node.y || 0, 500);
-      graphRef.current.zoom(2, 500);
+      graphRef.current.centerAt(node.x || 0, node.y || 0, 1000);
+      graphRef.current.zoom(2.5, 500);
       setSelectedNode(nodeId);
       setSearchQuery('');
       setSearchResults([]);
@@ -457,8 +438,7 @@ export const ContextView: React.FC = () => {
   
   const handleRefresh = async () => {
     setIsLoading(true);
-    // Force refresh to bypass cache
-    const data = await fetchGraphData(true);
+    const data = await fetchGraphData();
     setGraphData(data);
     setIsLoading(false);
     graphRef.current?.zoomToFit(400, 80);
@@ -473,7 +453,41 @@ export const ContextView: React.FC = () => {
     document.body.style.cursor = node ? 'pointer' : 'default';
   }, []);
 
-  
+  const handleNodeDragStart = useCallback((node: any) => {
+    setIsSimulationRunning(true);
+    graphData.nodes.forEach(n => {
+      if (n.id === node.id) return;
+      const dx = (n.x || 0) - (node.x || 0);
+      const dy = (n.y || 0) - (node.y || 0);
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance < 150) {
+        n.fx = undefined;
+        n.fy = undefined;
+      }
+    });
+    graphRef.current?.d3ReheatSimulation();
+  }, [graphData.nodes]);
+
+  const handleNodeDrag = useCallback((node: any) => {
+    node.fx = node.x;
+    node.fy = node.y;
+  }, []);
+
+  const handleNodeDragEnd = useCallback((node: any) => {
+    node.fx = node.x;
+    node.fy = node.y;
+    setTimeout(() => {
+      setIsSimulationRunning(false);
+      graphData.nodes.forEach(n => {
+        if (n.x !== undefined && n.y !== undefined) {
+          n.fx = n.x;
+          n.fy = n.y;
+        }
+      });
+      saveNodePositions(graphData.nodes);
+    }, 1000);
+  }, [graphData.nodes]);
+
   // Handle spreading nodes out
   const handleSpreadNodes = useCallback(() => {
     if (!graphRef.current) return;
@@ -618,71 +632,20 @@ export const ContextView: React.FC = () => {
             )}
           </div>
 
-          {/* Particle Toggle */}
+          {/* Relationship Text Toggle */}
           <button
-            onClick={() => setShowParticles(!showParticles)}
+            onClick={() => setRelationshipTextMode(
+              relationshipTextMode === 'off' ? 'abbrev' : relationshipTextMode === 'abbrev' ? 'full' : 'off'
+            )}
             className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              showParticles
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
-            }`}
-          >
-            ⚡ {showParticles ? 'ON' : 'OFF'}
-          </button>
-
-          <button
-            onClick={() => setShowLinks(!showLinks)}
-            className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              showLinks
-                ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
-                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
-            }`}
-          >
-            🔗 {showLinks ? 'ON' : 'OFF'}
-          </button>
-
-          <button
-            onClick={() => setShowLinkLabels(!showLinkLabels)}
-            className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              showLinkLabels
-                ? 'bg-green-500/20 text-green-400 border border-green-500/30'
-                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
-            }`}
-          >
-            🔤 {showLinkLabels ? 'LABELS ON' : 'LABELS OFF'}
-          </button>
-
-          <button
-            onClick={() => setShowStraightLines(!showStraightLines)}
-            className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              showStraightLines
-                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
-            }`}
-          >
-            📏 {showStraightLines ? 'STRAIGHT' : 'CURVED'}
-          </button>
-
-          <button
-            onClick={() => setShowLineAnimations(!showLineAnimations)}
-            className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              showLineAnimations
+              relationshipTextMode === 'off'
+                ? 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
+                : relationshipTextMode === 'abbrev'
                 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
+                : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
             }`}
           >
-            ⚡ {showLineAnimations ? 'ANIM ON' : 'ANIM OFF'}
-          </button>
-
-          <button
-            onClick={() => setAbbreviateLabels(!abbreviateLabels)}
-            className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
-              abbreviateLabels
-                ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
-                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
-            }`}
-          >
-            📝 {abbreviateLabels ? 'ABBREV' : 'FULL'}
+            🏷 {relationshipTextMode === 'off' ? 'OFF' : relationshipTextMode === 'abbrev' ? 'ABBREV' : 'FULL'}
           </button>
 
           <button
@@ -750,167 +713,129 @@ export const ContextView: React.FC = () => {
 
                 // 2D Settings
                 backgroundColor="#0a0a0f"
+                showNavInfo={false}
 
-                // Wire geometric nodes (adapted for 2D)
-                nodeCanvasObject={(node, ctx, globalScale) => {
+                // 2D Interaction
+                enableNodeDrag={true}
+                enableZoom={true}
+                enablePan={true}
+
+                // Node rendering
+                nodeCanvasObject={(node, ctx) => {
                   const n = node as Node;
                   const colors = getNodeColor(n);
                   const isHighlighted = highlightedNodes.size === 0 || highlightedNodes.has(n.id);
                   const isSelected = selectedNode === n.id;
                   const isHovered = hoveredNode === n.id;
 
-                  const baseRadius = isSelected ? 8 : isHovered ? 6 : 5;
+                  const radius = isSelected ? 6 : isHovered ? 5 : 4;
+                  const x = n.x || 0;
+                  const y = n.y || 0;
 
-                  // Node position
-                  const x = node.x || 0;
-                  const y = node.y || 0;
-
-                  ctx.save();
-                  ctx.translate(x, y);
-
-                  // Create wire geometric shape
-                  ctx.strokeStyle = colors.primary;
-                  ctx.lineWidth = isHighlighted ? 2 : 1;
-                  ctx.globalAlpha = isHighlighted ? 0.9 : 0.6;
+                  // Draw outer circle
                   ctx.fillStyle = colors.primary;
-
-                  // Draw spiral/geometric pattern
                   ctx.beginPath();
-                  const points = [
-                    { x: -baseRadius, y: 0 },
-                    { x: -baseRadius * 0.5, y: baseRadius * 0.5 },
-                    { x: 0, y: 0 },
-                    { x: baseRadius * 0.5, y: baseRadius * 0.5 },
-                    { x: baseRadius, y: 0 },
-                    { x: baseRadius * 0.5, y: -baseRadius * 0.5 },
-                    { x: 0, y: 0 },
-                    { x: -baseRadius * 0.5, y: -baseRadius * 0.5 },
-                    { x: -baseRadius, y: 0 }
-                  ];
+                  ctx.arc(x, y, radius, 0, 2 * Math.PI);
+                  ctx.fill();
 
-                  points.forEach((point, i) => {
-                    if (i === 0) {
-                      ctx.moveTo(point.x, point.y);
-                    } else {
-                      ctx.lineTo(point.x, point.y);
-                    }
-                  });
-
-                  ctx.closePath();
-                  ctx.stroke();
-
-                  // Add inner glow for highlighted nodes
+                  // Draw glow effect
                   if (isHighlighted) {
+                    ctx.strokeStyle = colors.glow;
+                    ctx.lineWidth = 2;
                     ctx.beginPath();
-                    ctx.arc(0, 0, baseRadius * 0.3, 0, 2 * Math.PI);
-                    ctx.globalAlpha = 0.4;
-                    ctx.fill();
+                    ctx.arc(x, y, radius + 2, 0, 2 * Math.PI);
+                    ctx.stroke();
                   }
 
-                  ctx.restore();
+                  // Draw label
+                  ctx.fillStyle = THEME.text.primary;
+                  ctx.font = 'bold 12px monospace';
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillText(n.id.substring(0, 1).toUpperCase(), x, y);
+                }}
+                nodePointerAreaPaint={(node, color, ctx) => {
+                  const n = node as Node;
+                  const radius = 8;
+                  const x = n.x || 0;
+                  const y = n.y || 0;
+                  ctx.fillStyle = color;
+                  ctx.beginPath();
+                  ctx.arc(x, y, radius, 0, 2 * Math.PI);
+                  ctx.fill();
                 }}
 
-                // Links with glow effect
-                linkColor={showLinks ? '#00f5d4' : 'rgba(0,245,212,0.1)'}
-                linkWidth={showLinks ? 0.8 : 0}
-                linkDirectionalParticles={showParticles && showLineAnimations ? 3 : 0}
-                linkDirectionalParticleSpeed={0.008}
-                linkDirectionalParticleWidth={2.5}
-                linkDirectionalParticleColor="#ffff00"
+                // Link rendering
+                linkCanvasObject={(link, ctx) => {
+                  const sourceId = typeof link.source === 'object' ? (link.source as Node).id : link.source;
+                  const targetId = typeof link.target === 'object' ? (link.target as Node).id : link.target;
+                  const isHighlighted = activeNode && (sourceId === activeNode || targetId === activeNode);
 
-                // Custom link rendering for straight lines and labels
-                linkCanvasObject={(link, ctx, globalScale) => {
-                  const source = link.source as Node;
-                  const target = link.target as Node;
-                  const sourceX = source.x || 0;
-                  const sourceY = source.y || 0;
-                  const targetX = target.x || 0;
-                  const targetY = target.y || 0;
+                  ctx.strokeStyle = isHighlighted ? THEME.link.highlighted : THEME.link.default;
+                  ctx.lineWidth = isHighlighted ? 2 : 1;
+                  ctx.globalAlpha = isHighlighted ? 0.8 : 0.3;
 
-                  // Always draw lines for particles, but control visibility
-                  if (!showLinks && !showLineAnimations) return;
+                  const source = link.source as any;
+                  const target = link.target as any;
 
-                  ctx.save();
                   ctx.beginPath();
-                  ctx.moveTo(sourceX, sourceY);
+                  ctx.moveTo(source.x, source.y);
+                  ctx.lineTo(target.x, target.y);
+                  ctx.stroke();
 
-                  if (showStraightLines) {
-                    // Draw straight line
-                    ctx.lineTo(targetX, targetY);
-                  } else {
-                    // Draw curved line
-                    const dx = targetX - sourceX;
-                    const dy = targetY - sourceY;
-                    const cx = sourceX + dx / 2 - dy / 4;
-                    const cy = sourceY + dy / 2 + dx / 4;
-                    ctx.quadraticCurveTo(cx, cy, targetX, targetY);
-                  }
+                  // Draw particles along the link
+                  if (showParticles) {
+                    const key = `${sourceId}-${targetId}`;
+                    const particles = particlesRef.current.get(key);
 
-                  // Draw line only if showLinks is true, otherwise make it nearly invisible for particles
-                  if (showLinks) {
-                    ctx.strokeStyle = '#00f5d4';
-                    ctx.lineWidth = 0.4;
-                    ctx.globalAlpha = 0.4;
-                    ctx.stroke();
-                  } else if (showLineAnimations) {
-                    // Draw invisible line for particles to follow with electric effect
-                    ctx.strokeStyle = 'rgba(0,245,212,0.15)';
-                    ctx.lineWidth = 1;
-                    ctx.globalAlpha = 0.1;
-                    ctx.stroke();
+                    if (particles) {
+                      particles.forEach(particle => {
+                        const x = source.x + (target.x - source.x) * particle.progress;
+                        const y = source.y + (target.y - source.y) * particle.progress;
 
-                    // Add electric glow effect
-                    ctx.strokeStyle = 'rgba(0,255,255,0.3)';
-                    ctx.lineWidth = 2;
-                    ctx.globalAlpha = 0.05;
-                    ctx.stroke();
-                  }
-                  ctx.restore();
-
-                  // Draw labels if enabled
-                  if (showLinkLabels && showLinks) {
-                    // Calculate midpoint
-                    const midX = (sourceX + targetX) / 2;
-                    const midY = (sourceY + targetY) / 2;
-
-                    // Only show label if zoomed in enough and link has a value
-                    let linkValue = typeof link.value === 'string' ? link.value : '';
-                    if (!linkValue || globalScale < 0.5) return;
-
-                    // Abbreviate if enabled
-                    if (abbreviateLabels && linkValue.length > 10) {
-                      // Create intelligent abbreviation
-                      linkValue = createReadableAbbreviation(linkValue);
+                        ctx.fillStyle = '#00f5d4';
+                        ctx.globalAlpha = 0.7;
+                        ctx.beginPath();
+                        ctx.arc(x, y, 2, 0, 2 * Math.PI);
+                        ctx.fill();
+                      });
                     }
+                  }
 
-                    ctx.save();
-                    ctx.translate(midX, midY);
+                  ctx.globalAlpha = 1;
 
-                    // Draw label background
-                    ctx.font = '10px monospace';
-                    const textWidth = ctx.measureText(linkValue).width;
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-                    ctx.fillRect(-textWidth / 2 - 4, -6, textWidth + 8, 12);
+                  // Draw relationship label if enabled
+                  if (relationshipTextMode !== 'off' && link.value && isHighlighted) {
+                    const midX = (source.x + target.x) / 2;
+                    const midY = (source.y + target.y) / 2;
 
-                    // Draw label text
-                    ctx.fillStyle = '#00f5d4';
+                    const label = relationshipTextMode === 'full' ? link.value : abbreviateRelationship(link.value);
+
+                    ctx.fillStyle = THEME.text.accent;
+                    ctx.font = relationshipTextMode === 'full' ? '9px monospace' : '10px monospace';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText(linkValue, 0, 0);
-
-                    ctx.restore();
+                    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+                    ctx.shadowBlur = 4;
+                    ctx.globalAlpha = 0.95;
+                    ctx.fillText(label, midX, midY - 5);
+                    ctx.shadowColor = 'transparent';
+                    ctx.globalAlpha = 1;
                   }
                 }}
 
                 // Events
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
+                onNodeDragStart={handleNodeDragStart}
+                onNodeDrag={handleNodeDrag}
+                onNodeDragEnd={handleNodeDragEnd}
                 onBackgroundClick={handleBackgroundClick}
               />
 
-              {/* Graph overlay info */}
+              {/* 2D overlay info */}
               <div className="absolute top-4 left-4 text-xs text-gray-400 font-mono bg-black/50 px-3 py-2 rounded">
-                🖱️ Left click: Select • Drag: Move • Scroll: Zoom • Right-click + drag: Pan
+                🖱️ Click + drag: Pan • Scroll: Zoom • Drag nodes to move
               </div>
             </>
           ) : isLoading ? (
@@ -1010,22 +935,19 @@ export const ContextView: React.FC = () => {
       <div className="px-6 py-3 border-t border-cyan-900/30 flex items-center justify-between text-xs font-mono text-gray-500">
         <div className="flex gap-6">
           <span><kbd className="text-cyan-400">Click</kbd> Select node</span>
-          <span><kbd className="text-cyan-400">Drag</kbd> Move nodes</span>
+          <span><kbd className="text-cyan-400">Drag Node</kbd> Move</span>
           <span><kbd className="text-cyan-400">Scroll</kbd> Zoom</span>
-          <span><kbd className="text-cyan-400">Right-click + Drag</kbd> Pan</span>
-          <span><kbd className="text-cyan-400">STRAIGHT</kbd> Line type</span>
-          <span><kbd className="text-cyan-400">ANIM</kbd> Particles</span>
-          <span><kbd className="text-cyan-400">ABBREV</kbd> Labels</span>
+          <span><kbd className="text-cyan-400">Drag Canvas</kbd> Pan</span>
         </div>
         <div className="flex gap-4">
           {['person', 'organization', 'place', 'tool', 'project', 'concept'].map(type => (
             <div key={type} className="flex items-center gap-1.5">
-              <span 
-                className="w-2.5 h-2.5 rounded-full" 
-                style={{ 
+              <span
+                className="w-2.5 h-2.5 rounded-full"
+                style={{
                   backgroundColor: THEME.nodeColors[type as keyof typeof THEME.nodeColors].primary,
                   boxShadow: `0 0 6px ${THEME.nodeColors[type as keyof typeof THEME.nodeColors].primary}`
-                }} 
+                }}
               />
               <span className="capitalize">{type}</span>
             </div>

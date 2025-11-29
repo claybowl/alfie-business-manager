@@ -77,10 +77,10 @@ The application will be available at:
 ### Frontend (React + Vite)
 - **Framework:** React 19 with TypeScript
 - **Build Tool:** Vite
-- **2D Visualization:** React Force Graph 2D with Canvas rendering
+- **3D Visualization:** React Force Graph 3D with Three.js
 - **Styling:** Custom CSS with cyberpunk/neon theme
 - **Key Features:**
-  - 2D Interactive knowledge graph with wire geometric nodes
+  - 3D Interactive knowledge graph
   - Real-time data visualization
   - Node relationship mapping
   - Search and navigation controls
@@ -100,14 +100,14 @@ The application will be available at:
   - Data synchronization
   - API proxy services
 
-## 🎮 2D Knowledge Graph Controls
+## 🎮 3D Knowledge Graph Controls
 
 **Navigation:**
-- **Left Click:** Select node
-- **Left Click + Drag:** Move nodes
-- **Scroll:** Zoom in/out
+- **Left Click + Drag:** Rotate the 3D view
 - **Right Click + Drag:** Pan the view
-- **Double-click:** Fit view to all nodes
+- **Scroll:** Zoom in/out
+- **Click Node:** Select and view details
+- **Drag Nodes:** Move nodes in 3D space
 
 **Interactive Features:**
 - **SPREAD Button:** Auto-distribute nodes with physics simulation
@@ -246,12 +246,12 @@ services:
 
 ## 🎨 Features
 
-### 2D Knowledge Graph
-- **Interactive 2D visualization** with force-directed physics
-- **Wire geometric node rendering** with spiral/geometric patterns
+### 3D Knowledge Graph
+- **Interactive 3D visualization** with force-directed physics
+- **Neon-styled node rendering** with spiral/brain-shaped outlines
 - **Real-time relationship mapping** and connection highlighting
 - **Advanced node physics** with collision detection and bouncing
-- **Canvas-based rendering** for smooth performance
+- **Camera controls** for rotation, pan, and zoom operations
 
 ### AI Agent Capabilities
 - **Knowledge graph management** and entity relationships
@@ -271,7 +271,7 @@ services:
 1. **Port Already in Use:** Vite will automatically find an available port
 2. **API Key Errors:** Verify all API keys are correctly set in environment files
 3. **Neo4j Connection:** Check database URI and credentials
-4. **Canvas Performance:** Reduce node count if experiencing lag
+4. **3D Graphics Performance:** Reduce node count if experiencing lag
 
 ### Debug Mode
 Enable debug logging:

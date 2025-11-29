@@ -27,15 +27,13 @@ export interface KnowledgeGraphData {
   links: Link[];
 }
 
-// Use environment variable or default to 8001
-const BACKEND_PORT = process.env.REACT_APP_BACKEND_PORT || '8001';
-const BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
+const BACKEND_URL = 'http://localhost:3002';
 const POSITION_STORAGE_KEY = 'alfie-graph-positions'; // Local storage for visual positions only
 
 // Cache for graph data to avoid excessive API calls
 let graphCache: KnowledgeGraphData | null = null;
 let lastFetchTime = 0;
-const CACHE_DURATION = 2000; // 2 seconds - reduced for more frequent refreshes
+const CACHE_DURATION = 5000; // 5 seconds
 
 // Function to get the graph from Graphiti API
 export const getGraph = (): KnowledgeGraphData => {
@@ -48,11 +46,11 @@ export const getGraph = (): KnowledgeGraphData => {
 };
 
 // Async function to fetch fresh graph data from Graphiti
-export const fetchGraphData = async (forceRefresh: boolean = false): Promise<KnowledgeGraphData> => {
+export const fetchGraphData = async (): Promise<KnowledgeGraphData> => {
   const now = Date.now();
-
-  // Return cache if still valid and not forcing refresh
-  if (!forceRefresh && graphCache && (now - lastFetchTime) < CACHE_DURATION) {
+  
+  // Return cache if still valid
+  if (graphCache && (now - lastFetchTime) < CACHE_DURATION) {
     return graphCache;
   }
 

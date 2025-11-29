@@ -30,14 +30,6 @@ export interface ActiveProject {
   lastAccessed: string;
   app: string;
   activityCount: number;
-  // Enhanced fields for heatmap and better infocards
-  heatLevel: 'low' | 'medium' | 'high' | 'critical';
-  relatedLinearIssues?: LinearIssueData[];
-  projectPath?: string;
-  lastActivity?: string;
-  activityTrend?: 'increasing' | 'decreasing' | 'stable';
-  languages?: string[];
-  frameworks?: string[];
 }
 
 export interface IntelligenceDossier {
@@ -116,14 +108,6 @@ export interface LinearIssueData {
 }
 
 // ============================================================================
-// CONFIGURATION
-// ============================================================================
-
-// Use environment variable or default to 8001
-const BACKEND_PORT = process.env.REACT_APP_BACKEND_PORT || '8001';
-const BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
-
-// ============================================================================
 // STORAGE
 // ============================================================================
 
@@ -179,20 +163,10 @@ interface FullBriefingResponse {
 
 async function fetchFullBriefingData(): Promise<FullBriefingResponse> {
   try {
-    const response = await fetch(`${BACKEND_URL}/api/briefing/full`);
+    const response = await fetch('http://localhost:3002/api/briefing/full');
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-
-    // Check content type to ensure we're getting JSON
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      const text = await response.text();
-      console.error('Unexpected content type:', contentType);
-      console.error('Response text (first 200 chars):', text.substring(0, 200));
-      throw new Error(`Expected JSON, got ${contentType}`);
-    }
-
     return await response.json();
   } catch (error) {
     console.error('Failed to fetch full briefing data:', error);
@@ -207,7 +181,7 @@ async function fetchFullBriefingData(): Promise<FullBriefingResponse> {
 
 async function fetchRawPiecesData(): Promise<RawPiecesResponse> {
   try {
-    const response = await fetch(`${BACKEND_URL}/api/pieces/activity`);
+    const response = await fetch('http://localhost:3002/api/pieces/activity');
     if (!response.ok) {
       return { total: 0, activities: [] };
     }
@@ -382,120 +356,72 @@ function extractDecisionsFromContent(content: string, decisions: string[]): void
   }
 }
 
-// Helper: Extract projects from summary content
+// Helper: Extract projects from summary content (only real projects)
 function extractProjectsFromContent(
   content: string,
   activeProjects: Map<string, ActiveProject>,
   dayLabel: string
 ): void {
-  // Early exit for obviously technical/JSON content
-  if (/^\s*[{}\[\]"]+/.test(content) ||
-      /\b(?:context|metadata|schema|json|response|request|error|cache|browser_url|ltm|pieces)\b/.test(content)) {
-    return; // Skip - this is clearly not project-related content
-  }
-  // Stopwords to filter out common non-project words
-  const stopwords = new Set([
-    'the', 'and', 'for', 'with', 'from', 'this', 'that', 'into', 'new', 'old',
-    'some', 'any', 'all', 'most', 'more', 'less', 'each', 'every', 'both',
-    'other', 'another', 'such', 'only', 'just', 'also', 'very', 'even',
-    'working', 'developing', 'implementing', 'project', 'app', 'application',
-    'system', 'backend', 'frontend', 'server', 'client', 'api', 'code',
-    'sorting', 'improving', 'fixing', 'updating', 'adding', 'removing',
-    'parsing', 'formatting', 'management', 'template', 'templates'
-  ]);
-  
-  // Look for project names in various patterns
-  // Pattern 1: "project/working on/developing/implementing ProjectName" - single word only
-  const projectPatterns = [
-    /(?:project|working on|developing|implementing)\s+["']?([A-Z][a-zA-Z0-9-]+)["']?/g,
-    /\*\*([A-Z][a-zA-Z0-9-]+)\*\*\s*(?:project|app|application|system)/gi,
-    /([A-Z][a-zA-Z0-9-]+)\s+(?:backend|frontend|server|client|API)/g
-  ];
-  
   const foundProjects = new Set<string>();
-  
-  for (const pattern of projectPatterns) {
-    let match;
-    // Reset lastIndex for each pattern (important for /g flag)
-    pattern.lastIndex = 0;
-    while ((match = pattern.exec(content)) !== null) {
-      const projectName = match[1]?.trim();
-      // Filter: must start with uppercase, be 3-40 chars, not a stopword
-      if (projectName && 
-          projectName.length >= 3 && 
-          projectName.length <= 40 &&
-          /^[A-Z]/.test(projectName) &&
-          !stopwords.has(projectName.toLowerCase())) {
-        foundProjects.add(projectName);
-      }
+
+  // Known project patterns that are definitely projects
+  // Pattern 1: "working on/project/developing ProjectName" - explicit project mentions
+  const explicitProjectPattern = /(?:working on|project:|developing|implementing|building)\s+(?:the\s+)?["']?([A-Z][a-zA-Z0-9_-]{2,30})["']?/g;
+  let match;
+  while ((match = explicitProjectPattern.exec(content)) !== null) {
+    const projectName = match[1]?.trim();
+    if (projectName && projectName.length >= 3 && projectName.length <= 40) {
+      foundProjects.add(projectName);
     }
   }
-  
-  // Also look for specific code/repo references (these are more reliable)
-  const repoPattern = /(?:repository|repo|codebase)\s*[:\-]?\s*["']?([a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)?)/gi;
+
+  // Pattern 2: Bold project names (often markdown formatting for project names)
+  const boldPattern = /\*\*([A-Z][a-zA-Z0-9_-]{2,30})\*\*(?:\s+(?:project|app|system|manager|dashboard))?/gi;
+  while ((match = boldPattern.exec(content)) !== null) {
+    const projectName = match[1]?.trim();
+    // Only if it looks like a project (has keywords nearby or is compound)
+    if (projectName && projectName.length >= 3 && projectName.length <= 40 && projectName.includes('-')) {
+      foundProjects.add(projectName);
+    }
+  }
+
+  // Pattern 3: Code/repo references (these are definitely projects)
+  const repoPattern = /(?:repository|repo|codebase|github|gitlab)\s*[:\-]?\s*["']?([a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)?)["']?/gi;
   let repoMatch;
   while ((repoMatch = repoPattern.exec(content)) !== null) {
     const repoName = repoMatch[1]?.trim();
-    if (repoName && repoName.length >= 3 && !stopwords.has(repoName.toLowerCase())) {
+    if (repoName && repoName.length >= 3 && repoName.length <= 40) {
       foundProjects.add(repoName);
     }
   }
-  
-  // Look for Alfie-specific patterns
-  const alfiePattern = /Alfie[-\s]?(?:Business[-\s]?Manager|Agent|[A-Z][a-zA-Z0-9-]*)/gi;
-  let alfieMatch;
-  while ((alfieMatch = alfiePattern.exec(content)) !== null) {
-    foundProjects.add(alfieMatch[0].replace(/\s+/g, '-'));
-  }
-  
-  // Additional validation - require multiple mentions OR explicit project context
-  const words = cleanContent.match(/\b[A-Z][a-zA-Z0-9\s\-_]*\b/g);
-  if (words) {
-    const wordCount = new Map<string, number>();
-    words.forEach(word => {
-      if (word.length >= 4 && !/\b(?:working|developing|implementing|project|app|application|system|backend|frontend|server|client|api|code|data|cache|context|json|response|request|error|metadata|schema)\b/i.test(word)) {
-        wordCount.set(word, (wordCount.get(word) || 0) + 1);
-      }
-    });
 
-    // Only include words that appear multiple times OR have explicit project context
-    wordCount.forEach((count, word) => {
-      const hasExplicitContext =
-        cleanContent.toLowerCase().includes(`${word.toLowerCase()} project`) ||
-        cleanContent.toLowerCase().includes(`working on ${word.toLowerCase()}`) ||
-        cleanContent.toLowerCase().includes(`${word.toLowerCase()} application`);
+  // Pattern 4: Known projects (curated list - common sense real projects)
+  const knownProjects = [
+    'Alfie', 'Alfie-Business-Manager', 'Alfie Business Manager',
+    'Graphiti', 'Pieces', 'Neo4j', 'Linear', 'Notion',
+    'React', 'Node', 'Python', 'TypeScript', 'Vite'
+  ];
 
-      if (count >= 2 || hasExplicitContext) {
-        foundProjects.set(word, Math.max((foundProjects.get(word) || 0), count));
-      }
-    });
+  const knownLowerSet = new Set(knownProjects.map(p => p.toLowerCase()));
+
+  for (const project of knownProjects) {
+    if (content.toLowerCase().includes(project.toLowerCase())) {
+      foundProjects.add(project);
+    }
   }
 
-  // Filter to only credible projects (strict criteria)
-  const validProjects = Array.from(foundProjects.entries())
-    .filter(([name, count]) => {
-      return count >= 2 || // Mentioned multiple times
-             cleanContent.toLowerCase().includes(`${name.toLowerCase()} project`) ||
-             cleanContent.toLowerCase().includes(`working on ${name.toLowerCase()}`) ||
-             cleanContent.toLowerCase().includes(`${name.toLowerCase()} application`) ||
-             /^[A-Z][a-z][A-Za-z]*$/.test(name); // Properly capitalized
-    })
-    .sort((a, b) => b[1] - a[1]) // Sort by frequency
-    .slice(0, 2); // Limit to top 2 per day to avoid noise
-
-  // Update active projects with strictly validated projects only
-  validProjects.forEach(([projectName, count]) => {
+  // Add found projects, tracking activity count
+  foundProjects.forEach(projectName => {
     if (!activeProjects.has(projectName)) {
       activeProjects.set(projectName, {
         name: projectName,
         lastAccessed: dayLabel,
         app: 'Pieces Context',
-        activityCount: Math.min(count, 8) // Cap to avoid unrealistic counts
+        activityCount: 1
       });
     } else {
       const existing = activeProjects.get(projectName)!;
-      existing.activityCount = Math.min(existing.activityCount + count, 15); // Cap growth
-      existing.lastAccessed = dayLabel;
+      existing.activityCount++;
     }
   });
 }
@@ -528,82 +454,6 @@ function extractReadableTime(combinedString: string): string {
   return match ? match[1].trim() : 'Recently';
 }
 
-// Enhanced project enrichment function
-function enhanceActiveProjectsWithLinear(
-  projects: ActiveProject[],
-  linearIssues: LinearIssueData[]
-): ActiveProject[] {
-  return projects.map(project => {
-    // Determine heat level based on activity count
-    let heatLevel: 'low' | 'medium' | 'high' | 'critical';
-    if (project.activityCount >= 20) {
-      heatLevel = 'critical';
-    } else if (project.activityCount >= 10) {
-      heatLevel = 'high';
-    } else if (project.activityCount >= 5) {
-      heatLevel = 'medium';
-    } else {
-      heatLevel = 'low';
-    }
-
-    // Find related Linear issues
-    const relatedIssues = linearIssues.filter(issue =>
-      issue.title.toLowerCase().includes(project.name.toLowerCase()) ||
-      issue.project?.toLowerCase().includes(project.name.toLowerCase()) ||
-      project.name.toLowerCase().includes(issue.title.toLowerCase().split(' ')[0])
-    );
-
-    // Extract tech stack information from project name
-    const techPatterns = {
-      languages: ['react', 'typescript', 'javascript', 'python', 'java', 'go', 'rust', 'swift', 'kotlin'],
-      frameworks: ['next', 'vue', 'angular', 'django', 'flask', 'express', 'fastapi', 'spring', 'laravel']
-    };
-
-    const projectNameLower = project.name.toLowerCase();
-    const languages = techPatterns.languages.filter(lang => projectNameLower.includes(lang));
-    const frameworks = techPatterns.frameworks.filter(fw => projectNameLower.includes(fw));
-
-    // Determine activity trend based on activity count
-    let activityTrend: 'increasing' | 'decreasing' | 'stable';
-    if (project.activityCount >= 15) {
-      activityTrend = 'increasing';
-    } else if (project.activityCount <= 3) {
-      activityTrend = 'decreasing';
-    } else {
-      activityTrend = 'stable';
-    }
-
-    // Extract project path from name if it looks like a path
-    const pathMatch = project.name.match(/^(.*[\\\/])(.+)$/);
-    const projectPath = pathMatch ? pathMatch[1] : undefined;
-
-    // Get last activity time (if different from last accessed)
-    const lastActivity = project.activityCount > 5 ? 'Recent' : undefined;
-
-    return {
-      ...project,
-      heatLevel,
-      relatedLinearIssues: relatedIssues.length > 0 ? relatedIssues : undefined,
-      projectPath,
-      lastActivity,
-      activityTrend,
-      languages: languages.length > 0 ? languages : undefined,
-      frameworks: frameworks.length > 0 ? frameworks : undefined
-    };
-  }).sort((a, b) => {
-    // Sort by heat level first (critical > high > medium > low), then by activity count
-    const heatOrder = { critical: 4, high: 3, medium: 2, low: 1 };
-    const aHeat = heatOrder[a.heatLevel];
-    const bHeat = heatOrder[b.heatLevel];
-
-    if (aHeat !== bHeat) {
-      return bHeat - aHeat;
-    }
-
-    return b.activityCount - a.activityCount;
-  });
-}
-
 function extractEventSummary(combinedString: string): string {
   const extractedMatch = combinedString?.match(/Extracted text: \[.*?\]\n?(.+)/s);
   if (extractedMatch) {
@@ -624,12 +474,78 @@ export function getUserNotes(): string {
   }
 }
 
-export function saveUserNotes(notes: string): void {
+export async function saveUserNotes(notes: string): Promise<void> {
   try {
+    // Save to localStorage
     localStorage.setItem(NOTES_STORAGE_KEY, notes);
+
+    // Also save to knowledge graph so Alfie can consider it in responses
+    if (notes.trim().length > 0) {
+      try {
+        const response = await fetch('http://localhost:3002/api/graph/episode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: `USER NOTES: ${notes}`,
+            source: 'alfie_user_notes',
+            episode_type: 'message'
+          })
+        });
+
+        if (!response.ok) {
+          console.warn('Failed to save notes to knowledge graph:', response.status);
+        }
+      } catch (error) {
+        console.warn('Failed to sync notes to knowledge graph:', error);
+        // Don't throw - local save already succeeded
+      }
+    }
   } catch (e) {
     console.error('Failed to save user notes:', e);
   }
+}
+
+// ============================================================================
+// PROJECT ACTIVITY ENHANCEMENT
+// ============================================================================
+
+/**
+ * Enhance project activity counts by looking for project mentions across Linear and Notion.
+ * This creates a heatmap effect where heavily used projects across multiple sources get higher counts.
+ */
+function enhanceProjectActivityFromSources(
+  activeProjects: Map<string, ActiveProject>,
+  linearIssues: LinearIssueData[],
+  notionPages: NotionPage[]
+): void {
+  // Known projects to look for
+  const projectNames = Array.from(activeProjects.keys());
+
+  // Scan Linear issues for project mentions
+  linearIssues.forEach(issue => {
+    projectNames.forEach(projectName => {
+      const projectLower = projectName.toLowerCase();
+      const issueText = `${issue.title} ${issue.project || ''}`.toLowerCase();
+
+      if (issueText.includes(projectLower)) {
+        const project = activeProjects.get(projectName)!;
+        project.activityCount += 2; // Weight Linear mentions as +2
+      }
+    });
+  });
+
+  // Scan Notion pages for project mentions
+  notionPages.forEach(page => {
+    projectNames.forEach(projectName => {
+      const projectLower = projectName.toLowerCase();
+      const pageText = `${page.title} ${page.content || ''}`.toLowerCase();
+
+      if (pageText.includes(projectLower)) {
+        const project = activeProjects.get(projectName)!;
+        project.activityCount += 1; // Weight Notion mentions as +1
+      }
+    });
+  });
 }
 
 // ============================================================================
@@ -663,9 +579,12 @@ export async function generateIntelligenceDossier(forceRefresh = false): Promise
 
   // Extract Linear issues
   const linearIssues: LinearIssueData[] = fullData.linear?.issues || [];
-  
+
   // Extract Notion pages
   const notionPages: NotionPage[] = fullData.notion?.pages || [];
+
+  // Boost project activity counts based on mentions across all sources (Linear, Notion, etc.)
+  enhanceProjectActivityFromSources(activeProjects, linearIssues, notionPages);
 
   // Build raw context for Alfie (now includes all sources)
   const rawContext = buildRawContext(summaries, events, decisions, linearIssues, notionPages);
@@ -679,13 +598,10 @@ export async function generateIntelligenceDossier(forceRefresh = false): Promise
   if (fullData.notion) statusParts.push(`Notion (${notionPages.length})`);
   else statusParts.push('Notion ✗');
 
-  // Enhance active projects with heatmap and Linear integration
-  const enhancedProjects = enhanceActiveProjectsWithLinear(Array.from(activeProjects.values()), linearIssues);
-
   const dossier: IntelligenceDossier = {
     timestamp: new Date().toISOString(),
     systemStatus: statusParts.join(' • '),
-    activeProjects: enhancedProjects,
+    activeProjects,
     recentDecisions: decisions,
     timeline: summaries,
     events,

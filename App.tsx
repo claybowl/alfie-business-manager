@@ -42,7 +42,7 @@ const App: React.FC = () => {
               </div>
               <p className="text-gray-400 italic text-sm hidden md:block">"Intelligence is a very valuable thing, innit, my friend?"</p>
             </div>
-            <Tabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+            <Tabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab as (id: string) => void} />
         </div>
       </header>
       

@@ -143,7 +143,7 @@ export const AgentView: React.FC = () => {
       const ai = new GoogleGenAI({ apiKey });
       
       // Load Knowledge Graph from Graphiti (keep it compact)
-      const graphData = await fetchGraphData(true);
+      const graphData = await fetchGraphData();
       const graphContext = graphData.nodes.length > 0 
         ? JSON.stringify({ 
             nodes: graphData.nodes.slice(0, 50).map(n => ({ id: n.id, group: n.group })),

@@ -9,21 +9,8 @@
       "Bash(pnpm list:*)",
       "Bash(npm run build:*)",
       "Bash(npm run dev:*)",
-      "Bash(netstat:*)",
-      "Bash(findstr:*)",
-      "Bash(taskkill:*)",
-      "Bash(tasklist:*)",
-      "Bash(python:*)",
-      "Bash(curl:*)",
-      "Bash(node:*)",
-      "Bash(docker logs:*)",
-      "Bash(restart-services:*)",
-      "Bash(cmd:*)",
-      "Bash(set:*)",
-      "Bash(npx cross-env BACKEND_PORT=8000 npm run dev:*)",
-      "Bash(powershell:*)",
-      "Bash(cat:*)",
-      "Bash(npx tsc:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

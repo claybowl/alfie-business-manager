@@ -48,19 +48,19 @@ class GraphitiClient:
             # (Neo4j Aura sometimes throws these even with IF NOT EXISTS)
             try:
                 await self.graphiti.build_indices_and_constraints()
-                print("[OK] Indices created/verified")
+                print("✓ Indices created/verified")
             except Exception as idx_err:
                 if "EquivalentSchemaRuleAlreadyExists" in str(idx_err):
-                    print("[OK] Indices already exist (OK)")
+                    print("✓ Indices already exist (OK)")
                 else:
-                    print(f"[WARN] Index warning (non-fatal): {idx_err}")
-
+                    print(f"⚠ Index warning (non-fatal): {idx_err}")
+            
             self._initialized = True
-            print("[OK] Graphiti initialized successfully")
+            print("✓ Graphiti initialized successfully")
             return True
-
+            
         except Exception as e:
-            print(f"[ERROR] Failed to initialize Graphiti: {e}")
+            print(f"✗ Failed to initialize Graphiti: {e}")
             import traceback
             traceback.print_exc()
             return False
