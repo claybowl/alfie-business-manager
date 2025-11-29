@@ -10,7 +10,12 @@
       "Bash(npm run build:*)",
       "Bash(npm run dev:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(pnpm install)",
+      "Bash(npx pnpm install)",
+      "Bash(CI=true npx pnpm install:*)",
+      "Bash(timeout 120s npx pnpm install:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

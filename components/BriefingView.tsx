@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  generateIntelligenceDossier, 
-  saveUserNotes, 
+import {
+  generateIntelligenceDossier,
+  saveUserNotes,
+  uploadDossierToSupabase,
   IntelligenceDossier,
   WorkstreamSummary,
   WorkstreamEvent,
@@ -20,6 +21,9 @@ export const BriefingView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [userNotes, setUserNotes] = useState('');
   const [notesSaved, setNotesSaved] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [lastCloudSync, setLastCloudSync] = useState<string | null>(localStorage.getItem('alfie-last-cloud-sync'));
 
   const loadDossier = async (forceRefresh = false) => {
     setIsLoading(true);
@@ -42,6 +46,30 @@ export const BriefingView: React.FC = () => {
     await saveUserNotes(userNotes);
     setNotesSaved(true);
     setTimeout(() => setNotesSaved(false), 2000);
+  };
+
+  const handleCloudSync = async () => {
+    if (!dossier) {
+      console.warn('No dossier to sync');
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncStatus('idle');
+    try {
+      await uploadDossierToSupabase(dossier);
+      const now = new Date().toISOString();
+      setLastCloudSync(now);
+      localStorage.setItem('alfie-last-cloud-sync', now);
+      setSyncStatus('success');
+      setTimeout(() => setSyncStatus('idle'), 2000);
+    } catch (error) {
+      console.error('Cloud sync failed:', error);
+      setSyncStatus('error');
+      setTimeout(() => setSyncStatus('idle'), 2000);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   if (isLoading && !dossier) {
@@ -94,6 +122,20 @@ export const BriefingView: React.FC = () => {
               >
                 <RefreshIcon className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
                 {isLoading ? 'SYNCING' : 'REFRESH'}
+              </button>
+              <button
+                onClick={handleCloudSync}
+                disabled={isSyncing || !dossier}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded border transition-all text-sm font-mono ${
+                  syncStatus === 'success'
+                    ? 'bg-green-600/20 text-green-400 border-green-600/30'
+                    : syncStatus === 'error'
+                    ? 'bg-red-600/20 text-red-400 border-red-600/30'
+                    : 'bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border-blue-600/30 disabled:opacity-50'
+                }`}
+              >
+                <span>☁️</span>
+                {isSyncing ? 'UPLOADING' : syncStatus === 'success' ? '✓ SYNCED' : syncStatus === 'error' ? '✗ FAILED' : 'UPLOAD'}
               </button>
             </div>
           </div>

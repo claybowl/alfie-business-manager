@@ -3,6 +3,9 @@
  * Intelligence Dossier - Fetches and synthesizes business data from Pieces, Notion, and Linear
  */
 
+import { supabase, isSupabaseConfigured, logSyncOperation } from './supabase';
+import { isBackendAvailable } from './networkStatus';
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -847,4 +850,134 @@ export async function getBriefing(forceRefresh = false): Promise<BusinessBriefin
 
 export function formatBriefingForAlfie(briefing: BusinessBriefing): string {
   return briefing.summary;
+}
+
+// ============================================================================
+// SUPABASE INTEGRATION
+// ============================================================================
+
+/**
+ * Upload current dossier to Supabase
+ */
+export async function uploadDossierToSupabase(dossier: IntelligenceDossier): Promise<void> {
+  if (!isSupabaseConfigured()) {
+    console.warn('Supabase not configured');
+    return;
+  }
+
+  try {
+    const snapshotData = {
+      timestamp: dossier.timestamp,
+      system_status: dossier.systemStatus,
+      active_projects: dossier.activeProjects,
+      recent_decisions: dossier.recentDecisions,
+      timeline: dossier.timeline,
+      events: dossier.events,
+      linear_issues: dossier.linearIssues,
+      notion_pages: dossier.notionPages,
+      user_notes: dossier.userNotes,
+      raw_context: dossier.rawContext,
+      data_sources: dossier.dataSources
+    };
+
+    const { error } = await supabase!
+      .from('briefing_snapshots')
+      .insert([snapshotData]);
+
+    if (error) {
+      throw error;
+    }
+
+    await logSyncOperation('briefing', 'success', 1);
+    console.log('✓ Briefing uploaded to Supabase');
+  } catch (error) {
+    console.error('Failed to upload dossier to Supabase:', error);
+    await logSyncOperation('briefing', 'failed', 0, (error as any).message);
+    throw error;
+  }
+}
+
+/**
+ * Fetch the latest dossier from Supabase
+ */
+export async function fetchDossierFromSupabase(): Promise<IntelligenceDossier | null> {
+  if (!isSupabaseConfigured()) {
+    console.warn('Supabase not configured');
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabase!
+      .from('briefing_snapshots')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    // Convert database format to IntelligenceDossier format
+    const dossier: IntelligenceDossier = {
+      timestamp: data.timestamp,
+      systemStatus: data.system_status,
+      activeProjects: data.active_projects || [],
+      recentDecisions: data.recent_decisions || [],
+      timeline: data.timeline || [],
+      events: data.events || [],
+      linearIssues: data.linear_issues || [],
+      notionPages: data.notion_pages || [],
+      userNotes: data.user_notes || '',
+      rawContext: data.raw_context || '',
+      dataSources: data.data_sources || { pieces: false, linear: false, notion: false }
+    };
+
+    return dossier;
+  } catch (error) {
+    console.error('Failed to fetch dossier from Supabase:', error);
+    return null;
+  }
+}
+
+/**
+ * Modified generateIntelligenceDossier with Supabase fallback
+ * This wraps the original function to add fallback logic
+ */
+const originalGenerateIntelligenceDossier = generateIntelligenceDossier;
+
+export async function generateIntelligenceDossierWithFallback(forceRefresh = false): Promise<IntelligenceDossier> {
+  // First try to use the local server
+  const backendAvailable = await isBackendAvailable();
+
+  if (backendAvailable) {
+    try {
+      return await originalGenerateIntelligenceDossier(forceRefresh);
+    } catch (error) {
+      console.warn('Failed to fetch from local server, falling back to Supabase:', error);
+    }
+  }
+
+  // Fall back to Supabase if server is unavailable
+  const supabaseData = await fetchDossierFromSupabase();
+  if (supabaseData) {
+    console.log('Using Supabase data (offline mode)');
+    return supabaseData;
+  }
+
+  // If both fail, return empty dossier
+  console.error('No data available from server or Supabase');
+  return {
+    timestamp: new Date().toISOString(),
+    systemStatus: 'Offline - No data available',
+    activeProjects: [],
+    recentDecisions: [],
+    timeline: [],
+    events: [],
+    linearIssues: [],
+    notionPages: [],
+    userNotes: '',
+    rawContext: '',
+    dataSources: { pieces: false, linear: false, notion: false }
+  };
 }
