@@ -30,6 +30,14 @@ export interface ActiveProject {
   lastAccessed: string;
   app: string;
   activityCount: number;
+  // Enhanced fields for heatmap and better infocards
+  heatLevel: 'low' | 'medium' | 'high' | 'critical';
+  relatedLinearIssues?: LinearIssueData[];
+  projectPath?: string;
+  lastActivity?: string;
+  activityTrend?: 'increasing' | 'decreasing' | 'stable';
+  languages?: string[];
+  frameworks?: string[];
 }
 
 export interface IntelligenceDossier {
@@ -108,6 +116,14 @@ export interface LinearIssueData {
 }
 
 // ============================================================================
+// CONFIGURATION
+// ============================================================================
+
+// Use environment variable or default to 8001
+const BACKEND_PORT = process.env.REACT_APP_BACKEND_PORT || '8001';
+const BACKEND_URL = `http://localhost:${BACKEND_PORT}`;
+
+// ============================================================================
 // STORAGE
 // ============================================================================
 
@@ -163,10 +179,20 @@ interface FullBriefingResponse {
 
 async function fetchFullBriefingData(): Promise<FullBriefingResponse> {
   try {
-    const response = await fetch('http://localhost:3002/api/briefing/full');
+    const response = await fetch(`${BACKEND_URL}/api/briefing/full`);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
+
+    // Check content type to ensure we're getting JSON
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error('Unexpected content type:', contentType);
+      console.error('Response text (first 200 chars):', text.substring(0, 200));
+      throw new Error(`Expected JSON, got ${contentType}`);
+    }
+
     return await response.json();
   } catch (error) {
     console.error('Failed to fetch full briefing data:', error);
@@ -181,7 +207,7 @@ async function fetchFullBriefingData(): Promise<FullBriefingResponse> {
 
 async function fetchRawPiecesData(): Promise<RawPiecesResponse> {
   try {
-    const response = await fetch('http://localhost:3002/api/pieces/activity');
+    const response = await fetch(`${BACKEND_URL}/api/pieces/activity`);
     if (!response.ok) {
       return { total: 0, activities: [] };
     }
@@ -358,10 +384,15 @@ function extractDecisionsFromContent(content: string, decisions: string[]): void
 
 // Helper: Extract projects from summary content
 function extractProjectsFromContent(
-  content: string, 
+  content: string,
   activeProjects: Map<string, ActiveProject>,
   dayLabel: string
 ): void {
+  // Early exit for obviously technical/JSON content
+  if (/^\s*[{}\[\]"]+/.test(content) ||
+      /\b(?:context|metadata|schema|json|response|request|error|cache|browser_url|ltm|pieces)\b/.test(content)) {
+    return; // Skip - this is clearly not project-related content
+  }
   // Stopwords to filter out common non-project words
   const stopwords = new Set([
     'the', 'and', 'for', 'with', 'from', 'this', 'that', 'into', 'new', 'old',
@@ -417,17 +448,54 @@ function extractProjectsFromContent(
     foundProjects.add(alfieMatch[0].replace(/\s+/g, '-'));
   }
   
-  foundProjects.forEach(projectName => {
+  // Additional validation - require multiple mentions OR explicit project context
+  const words = cleanContent.match(/\b[A-Z][a-zA-Z0-9\s\-_]*\b/g);
+  if (words) {
+    const wordCount = new Map<string, number>();
+    words.forEach(word => {
+      if (word.length >= 4 && !/\b(?:working|developing|implementing|project|app|application|system|backend|frontend|server|client|api|code|data|cache|context|json|response|request|error|metadata|schema)\b/i.test(word)) {
+        wordCount.set(word, (wordCount.get(word) || 0) + 1);
+      }
+    });
+
+    // Only include words that appear multiple times OR have explicit project context
+    wordCount.forEach((count, word) => {
+      const hasExplicitContext =
+        cleanContent.toLowerCase().includes(`${word.toLowerCase()} project`) ||
+        cleanContent.toLowerCase().includes(`working on ${word.toLowerCase()}`) ||
+        cleanContent.toLowerCase().includes(`${word.toLowerCase()} application`);
+
+      if (count >= 2 || hasExplicitContext) {
+        foundProjects.set(word, Math.max((foundProjects.get(word) || 0), count));
+      }
+    });
+  }
+
+  // Filter to only credible projects (strict criteria)
+  const validProjects = Array.from(foundProjects.entries())
+    .filter(([name, count]) => {
+      return count >= 2 || // Mentioned multiple times
+             cleanContent.toLowerCase().includes(`${name.toLowerCase()} project`) ||
+             cleanContent.toLowerCase().includes(`working on ${name.toLowerCase()}`) ||
+             cleanContent.toLowerCase().includes(`${name.toLowerCase()} application`) ||
+             /^[A-Z][a-z][A-Za-z]*$/.test(name); // Properly capitalized
+    })
+    .sort((a, b) => b[1] - a[1]) // Sort by frequency
+    .slice(0, 2); // Limit to top 2 per day to avoid noise
+
+  // Update active projects with strictly validated projects only
+  validProjects.forEach(([projectName, count]) => {
     if (!activeProjects.has(projectName)) {
       activeProjects.set(projectName, {
         name: projectName,
         lastAccessed: dayLabel,
         app: 'Pieces Context',
-        activityCount: 1
+        activityCount: Math.min(count, 8) // Cap to avoid unrealistic counts
       });
     } else {
       const existing = activeProjects.get(projectName)!;
-      existing.activityCount++;
+      existing.activityCount = Math.min(existing.activityCount + count, 15); // Cap growth
+      existing.lastAccessed = dayLabel;
     }
   });
 }
@@ -458,6 +526,82 @@ function extractProjectFromEvent(
 function extractReadableTime(combinedString: string): string {
   const match = combinedString?.match(/Last accessed: ([^\n(]+)/);
   return match ? match[1].trim() : 'Recently';
+}
+
+// Enhanced project enrichment function
+function enhanceActiveProjectsWithLinear(
+  projects: ActiveProject[],
+  linearIssues: LinearIssueData[]
+): ActiveProject[] {
+  return projects.map(project => {
+    // Determine heat level based on activity count
+    let heatLevel: 'low' | 'medium' | 'high' | 'critical';
+    if (project.activityCount >= 20) {
+      heatLevel = 'critical';
+    } else if (project.activityCount >= 10) {
+      heatLevel = 'high';
+    } else if (project.activityCount >= 5) {
+      heatLevel = 'medium';
+    } else {
+      heatLevel = 'low';
+    }
+
+    // Find related Linear issues
+    const relatedIssues = linearIssues.filter(issue =>
+      issue.title.toLowerCase().includes(project.name.toLowerCase()) ||
+      issue.project?.toLowerCase().includes(project.name.toLowerCase()) ||
+      project.name.toLowerCase().includes(issue.title.toLowerCase().split(' ')[0])
+    );
+
+    // Extract tech stack information from project name
+    const techPatterns = {
+      languages: ['react', 'typescript', 'javascript', 'python', 'java', 'go', 'rust', 'swift', 'kotlin'],
+      frameworks: ['next', 'vue', 'angular', 'django', 'flask', 'express', 'fastapi', 'spring', 'laravel']
+    };
+
+    const projectNameLower = project.name.toLowerCase();
+    const languages = techPatterns.languages.filter(lang => projectNameLower.includes(lang));
+    const frameworks = techPatterns.frameworks.filter(fw => projectNameLower.includes(fw));
+
+    // Determine activity trend based on activity count
+    let activityTrend: 'increasing' | 'decreasing' | 'stable';
+    if (project.activityCount >= 15) {
+      activityTrend = 'increasing';
+    } else if (project.activityCount <= 3) {
+      activityTrend = 'decreasing';
+    } else {
+      activityTrend = 'stable';
+    }
+
+    // Extract project path from name if it looks like a path
+    const pathMatch = project.name.match(/^(.*[\\\/])(.+)$/);
+    const projectPath = pathMatch ? pathMatch[1] : undefined;
+
+    // Get last activity time (if different from last accessed)
+    const lastActivity = project.activityCount > 5 ? 'Recent' : undefined;
+
+    return {
+      ...project,
+      heatLevel,
+      relatedLinearIssues: relatedIssues.length > 0 ? relatedIssues : undefined,
+      projectPath,
+      lastActivity,
+      activityTrend,
+      languages: languages.length > 0 ? languages : undefined,
+      frameworks: frameworks.length > 0 ? frameworks : undefined
+    };
+  }).sort((a, b) => {
+    // Sort by heat level first (critical > high > medium > low), then by activity count
+    const heatOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+    const aHeat = heatOrder[a.heatLevel];
+    const bHeat = heatOrder[b.heatLevel];
+
+    if (aHeat !== bHeat) {
+      return bHeat - aHeat;
+    }
+
+    return b.activityCount - a.activityCount;
+  });
 }
 
 function extractEventSummary(combinedString: string): string {
@@ -535,10 +679,13 @@ export async function generateIntelligenceDossier(forceRefresh = false): Promise
   if (fullData.notion) statusParts.push(`Notion (${notionPages.length})`);
   else statusParts.push('Notion ✗');
 
+  // Enhance active projects with heatmap and Linear integration
+  const enhancedProjects = enhanceActiveProjectsWithLinear(Array.from(activeProjects.values()), linearIssues);
+
   const dossier: IntelligenceDossier = {
     timestamp: new Date().toISOString(),
     systemStatus: statusParts.join(' • '),
-    activeProjects,
+    activeProjects: enhancedProjects,
     recentDecisions: decisions,
     timeline: summaries,
     events,

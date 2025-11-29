@@ -9,7 +9,7 @@ import EventSource from 'eventsource';
 global.EventSource = EventSource;
 
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.BACKEND_PORT || 8001;
 const PIECES_SSE_URL = 'http://localhost:39300/model_context_protocol/2024-11-05/sse';
 
 // API Keys (loaded from environment variables)

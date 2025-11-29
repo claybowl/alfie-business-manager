@@ -182,7 +182,10 @@ export const ContextView: React.FC = () => {
   const [showParticles, setShowParticles] = useState(true);
   const [showLinkLabels, setShowLinkLabels] = useState(false);
   const [showLinks, setShowLinks] = useState(true);
-  
+  const [showStraightLines, setShowStraightLines] = useState(false);
+  const [showLineAnimations, setShowLineAnimations] = useState(true);
+  const [abbreviateLabels, setAbbreviateLabels] = useState(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraphMethods | undefined>();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -190,6 +193,58 @@ export const ContextView: React.FC = () => {
   // Particle animation state
   const particlesRef = useRef<Map<string, { progress: number; speed: number }[]>>(new Map());
   const animationRef = useRef<number>(0);
+
+  // Create intelligent abbreviation function
+  const createReadableAbbreviation = (text: string): string => {
+    // List of important words to keep when possible
+    const importantWords = ['is', 'has', 'can', 'will', 'was', 'were', 'are', 'been', 'being', 'have', 'had', 'do', 'does', 'did'];
+    const actionWords = ['relates', 'connects', 'links', 'associated', 'related', 'connected', 'depends', 'requires', 'needs', 'uses', 'contains', 'includes', 'involves', 'affects', 'impacts', 'influences'];
+
+    const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 0);
+
+    if (words.length === 1) {
+      // Single word - just truncate if too long
+      return text.length > 12 ? text.substring(0, 12) + '...' : text;
+    }
+
+    // For multi-word phrases, try to keep meaningful words
+    let result: string[] = [];
+    let length = 0;
+
+    // First, try to keep action words or important short words
+    for (const word of words) {
+      if (length >= 15) break;
+
+      const lowerWord = word.toLowerCase();
+
+      // Keep action words and important words that are short
+      if ((actionWords.includes(lowerWord) || importantWords.includes(lowerWord)) && word.length <= 8) {
+        result.push(word);
+        length += word.length + 1; // +1 for space
+        continue;
+      }
+
+      // For other words, take first few characters
+      if (word.length > 6) {
+        result.push(word.substring(0, 4));
+        length += 4 + 1;
+      } else {
+        result.push(word);
+        length += word.length + 1;
+      }
+    }
+
+    // If result is still too long, be more aggressive
+    let finalResult = result.join(' ');
+    if (finalResult.length > 18) {
+      // Take first letter of each word + keep one meaningful word
+      const importantWord = words.find(w => actionWords.includes(w.toLowerCase()) || w.length <= 4) || words[0];
+      const initials = words.map(w => w[0]).join('').toUpperCase();
+      finalResult = `${importantWord.substring(0, 6)} ${initials}`;
+    }
+
+    return finalResult.trim();
+  };
 
   // ─────────────────────────────────────────────────────────────────────────────
   // EFFECTS
@@ -211,7 +266,8 @@ export const ContextView: React.FC = () => {
     const loadGraph = async () => {
       setIsLoading(true);
       try {
-        const data = await fetchGraphData();
+        // Force refresh on initial load to get latest data
+        const data = await fetchGraphData(true);
         setGraphData(data);
         // Initialize particles for each link
         data.links.forEach((link, i) => {
@@ -401,7 +457,8 @@ export const ContextView: React.FC = () => {
   
   const handleRefresh = async () => {
     setIsLoading(true);
-    const data = await fetchGraphData();
+    // Force refresh to bypass cache
+    const data = await fetchGraphData(true);
     setGraphData(data);
     setIsLoading(false);
     graphRef.current?.zoomToFit(400, 80);
@@ -416,41 +473,7 @@ export const ContextView: React.FC = () => {
     document.body.style.cursor = node ? 'pointer' : 'default';
   }, []);
 
-  const handleNodeDragStart = useCallback((node: any) => {
-    setIsSimulationRunning(true);
-    graphData.nodes.forEach(n => {
-      if (n.id === node.id) return;
-      const dx = (n.x || 0) - (node.x || 0);
-      const dy = (n.y || 0) - (node.y || 0);
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      if (distance < 150) {
-        n.fx = undefined;
-        n.fy = undefined;
-      }
-    });
-    graphRef.current?.d3ReheatSimulation();
-  }, [graphData.nodes]);
-
-  const handleNodeDrag = useCallback((node: any) => {
-    node.fx = node.x;
-    node.fy = node.y;
-  }, []);
-
-  const handleNodeDragEnd = useCallback((node: any) => {
-    node.fx = node.x;
-    node.fy = node.y;
-    setTimeout(() => {
-      setIsSimulationRunning(false);
-      graphData.nodes.forEach(n => {
-        if (n.x !== undefined && n.y !== undefined) {
-          n.fx = n.x;
-          n.fy = n.y;
-        }
-      });
-      saveNodePositions(graphData.nodes);
-    }, 1000);
-  }, [graphData.nodes]);
-
+  
   // Handle spreading nodes out
   const handleSpreadNodes = useCallback(() => {
     if (!graphRef.current) return;
@@ -630,6 +653,39 @@ export const ContextView: React.FC = () => {
           </button>
 
           <button
+            onClick={() => setShowStraightLines(!showStraightLines)}
+            className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
+              showStraightLines
+                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
+            }`}
+          >
+            📏 {showStraightLines ? 'STRAIGHT' : 'CURVED'}
+          </button>
+
+          <button
+            onClick={() => setShowLineAnimations(!showLineAnimations)}
+            className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
+              showLineAnimations
+                ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
+                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
+            }`}
+          >
+            ⚡ {showLineAnimations ? 'ANIM ON' : 'ANIM OFF'}
+          </button>
+
+          <button
+            onClick={() => setAbbreviateLabels(!abbreviateLabels)}
+            className={`px-3 py-1.5 rounded text-xs font-mono transition-all ${
+              abbreviateLabels
+                ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+                : 'bg-gray-800/50 text-gray-400 border border-gray-700/50'
+            }`}
+          >
+            📝 {abbreviateLabels ? 'ABBREV' : 'FULL'}
+          </button>
+
+          <button
             onClick={handleRefresh}
             disabled={isLoading}
             className="px-3 py-1.5 bg-gray-800/50 text-gray-300 border border-gray-700/50 rounded text-xs font-mono hover:bg-gray-700/50 disabled:opacity-50 transition-all"
@@ -694,13 +750,6 @@ export const ContextView: React.FC = () => {
 
                 // 2D Settings
                 backgroundColor="#0a0a0f"
-                showNavInfo={false}
-
-                // 2D Interaction
-                enableNodeDrag={true}
-                enableZoom={true}
-                enablePan={true}
-                autoRotate={false}
 
                 // Wire geometric nodes (adapted for 2D)
                 nodeCanvasObject={(node, ctx, globalScale) => {
@@ -761,10 +810,16 @@ export const ContextView: React.FC = () => {
                   ctx.restore();
                 }}
 
-                // Link labels rendering
-                linkCanvasObject={(link, ctx, globalScale) => {
-                  if (!showLinkLabels) return;
+                // Links with glow effect
+                linkColor={showLinks ? '#00f5d4' : 'rgba(0,245,212,0.1)'}
+                linkWidth={showLinks ? 0.8 : 0}
+                linkDirectionalParticles={showParticles && showLineAnimations ? 3 : 0}
+                linkDirectionalParticleSpeed={0.008}
+                linkDirectionalParticleWidth={2.5}
+                linkDirectionalParticleColor="#ffff00"
 
+                // Custom link rendering for straight lines and labels
+                linkCanvasObject={(link, ctx, globalScale) => {
                   const source = link.source as Node;
                   const target = link.target as Node;
                   const sourceX = source.x || 0;
@@ -772,52 +827,90 @@ export const ContextView: React.FC = () => {
                   const targetX = target.x || 0;
                   const targetY = target.y || 0;
 
-                  // Calculate midpoint
-                  const midX = (sourceX + targetX) / 2;
-                  const midY = (sourceY + targetY) / 2;
-
-                  // Only show label if zoomed in enough and link has a value
-                  const linkValue = typeof link.value === 'string' ? link.value : '';
-                  if (!linkValue || globalScale < 0.5) return;
+                  // Always draw lines for particles, but control visibility
+                  if (!showLinks && !showLineAnimations) return;
 
                   ctx.save();
-                  ctx.translate(midX, midY);
+                  ctx.beginPath();
+                  ctx.moveTo(sourceX, sourceY);
 
-                  // Draw label background
-                  ctx.font = '10px monospace';
-                  const textWidth = ctx.measureText(linkValue).width;
-                  ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-                  ctx.fillRect(-textWidth / 2 - 4, -6, textWidth + 8, 12);
+                  if (showStraightLines) {
+                    // Draw straight line
+                    ctx.lineTo(targetX, targetY);
+                  } else {
+                    // Draw curved line
+                    const dx = targetX - sourceX;
+                    const dy = targetY - sourceY;
+                    const cx = sourceX + dx / 2 - dy / 4;
+                    const cy = sourceY + dy / 2 + dx / 4;
+                    ctx.quadraticCurveTo(cx, cy, targetX, targetY);
+                  }
 
-                  // Draw label text
-                  ctx.fillStyle = '#00f5d4';
-                  ctx.textAlign = 'center';
-                  ctx.textBaseline = 'middle';
-                  ctx.fillText(linkValue, 0, 0);
+                  // Draw line only if showLinks is true, otherwise make it nearly invisible for particles
+                  if (showLinks) {
+                    ctx.strokeStyle = '#00f5d4';
+                    ctx.lineWidth = 0.4;
+                    ctx.globalAlpha = 0.4;
+                    ctx.stroke();
+                  } else if (showLineAnimations) {
+                    // Draw invisible line for particles to follow with electric effect
+                    ctx.strokeStyle = 'rgba(0,245,212,0.15)';
+                    ctx.lineWidth = 1;
+                    ctx.globalAlpha = 0.1;
+                    ctx.stroke();
 
+                    // Add electric glow effect
+                    ctx.strokeStyle = 'rgba(0,255,255,0.3)';
+                    ctx.lineWidth = 2;
+                    ctx.globalAlpha = 0.05;
+                    ctx.stroke();
+                  }
                   ctx.restore();
-                }}
 
-                // Links with glow effect
-                linkColor={showLinks ? '#00f5d4' : 'rgba(0,245,212,0)'}
-                linkWidth={showLinks ? 2 : 0}
-                linkDirectionalParticles={showLinks && showParticles ? 2 : 0}
-                linkDirectionalParticleSpeed={0.005}
-                linkDirectionalParticleWidth={2}
-                linkDirectionalParticleColor="#00f5d4"
+                  // Draw labels if enabled
+                  if (showLinkLabels && showLinks) {
+                    // Calculate midpoint
+                    const midX = (sourceX + targetX) / 2;
+                    const midY = (sourceY + targetY) / 2;
+
+                    // Only show label if zoomed in enough and link has a value
+                    let linkValue = typeof link.value === 'string' ? link.value : '';
+                    if (!linkValue || globalScale < 0.5) return;
+
+                    // Abbreviate if enabled
+                    if (abbreviateLabels && linkValue.length > 10) {
+                      // Create intelligent abbreviation
+                      linkValue = createReadableAbbreviation(linkValue);
+                    }
+
+                    ctx.save();
+                    ctx.translate(midX, midY);
+
+                    // Draw label background
+                    ctx.font = '10px monospace';
+                    const textWidth = ctx.measureText(linkValue).width;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                    ctx.fillRect(-textWidth / 2 - 4, -6, textWidth + 8, 12);
+
+                    // Draw label text
+                    ctx.fillStyle = '#00f5d4';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(linkValue, 0, 0);
+
+                    ctx.restore();
+                  }
+                }}
 
                 // Events
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
-                onNodeDragStart={handleNodeDragStart}
-                onNodeDrag={handleNodeDrag}
-                onNodeDragEnd={handleNodeDragEnd}
                 onBackgroundClick={handleBackgroundClick}
               />
 
-              {/* 3D overlay info */}
+              {/* Graph overlay info */}
               <div className="absolute top-4 left-4 text-xs text-gray-400 font-mono bg-black/50 px-3 py-2 rounded">
-                🖱️ Left click + drag: Rotate • Right click + drag: Pan • Scroll: Zoom
+                🖱️ Left click: Select • Drag: Move • Scroll: Zoom • Right-click + drag: Pan
               </div>
             </>
           ) : isLoading ? (
@@ -920,7 +1013,9 @@ export const ContextView: React.FC = () => {
           <span><kbd className="text-cyan-400">Drag</kbd> Move nodes</span>
           <span><kbd className="text-cyan-400">Scroll</kbd> Zoom</span>
           <span><kbd className="text-cyan-400">Right-click + Drag</kbd> Pan</span>
-          <span><kbd className="text-cyan-400">Double-click</kbd> Fit view</span>
+          <span><kbd className="text-cyan-400">STRAIGHT</kbd> Line type</span>
+          <span><kbd className="text-cyan-400">ANIM</kbd> Particles</span>
+          <span><kbd className="text-cyan-400">ABBREV</kbd> Labels</span>
         </div>
         <div className="flex gap-4">
           {['person', 'organization', 'place', 'tool', 'project', 'concept'].map(type => (

@@ -15,7 +15,15 @@
       "Bash(tasklist:*)",
       "Bash(python:*)",
       "Bash(curl:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(docker logs:*)",
+      "Bash(restart-services:*)",
+      "Bash(cmd:*)",
+      "Bash(set:*)",
+      "Bash(npx cross-env BACKEND_PORT=8000 npm run dev:*)",
+      "Bash(powershell:*)",
+      "Bash(cat:*)",
+      "Bash(npx tsc:*)"
     ],
     "deny": [],
     "ask": []
