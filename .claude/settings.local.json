@@ -20,7 +20,14 @@
       "Bash(ss:*)",
       "Bash(lsof:*)",
       "Bash(netstat:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(cat:*)",
+      "Bash(PORT=3002 npm run dev:*)",
+      "Bash(findstr:*)",
+      "Bash(set:*)",
+      "Bash(set GRAPHITI_SERVICE_URL=http://localhost:8500:*)",
+      "Bash(taskkill:*)",
+      "Bash($env:PORT=3002 $env:GRAPHITI_SERVICE_URL=http://localhost:8500 npm run dev)"
     ],
     "deny": [],
     "ask": []

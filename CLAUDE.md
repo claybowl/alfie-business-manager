@@ -51,6 +51,11 @@ npm install                    # Install dependencies
 npm run dev                    # Start Vite dev server (port 3000)
 npm run build                  # Build for production
 npm run preview               # Preview production build
+
+# Testing & Debugging
+node test-all-endpoints.js    # Test all backend endpoints
+node test-briefing.js         # Test briefing functionality
+node test-refresh.js          # Test data refresh
 ```
 
 ### Backend
@@ -59,6 +64,10 @@ cd backend
 npm install                    # Install dependencies
 npm run dev                    # Auto-reload development (node --watch)
 npm start                      # Production server
+
+# Debugging
+DEBUG=* npm run dev           # Enable debug logging
+node test_pieces_data.js      # Test Pieces MCP integration
 ```
 
 ### Graphiti Service
@@ -66,9 +75,14 @@ npm start                      # Production server
 cd graphiti-service
 pip install -r requirements.txt
 python main.py                # Start FastAPI service (port 8000)
+
 # or with Docker:
 docker build -t alfie-graphiti .
 docker run -p 8000:8000 alfie-graphiti
+
+# Testing
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/search -H "Content-Type: application/json" -d '{"query":"test"}'
 ```
 
 ### Full Stack Development (3 terminals)
@@ -81,6 +95,9 @@ npm run dev
 
 # Terminal 3: Graphiti service
 cd graphiti-service && python main.py
+
+# Terminal 4 (Optional): Test all services
+node test-all-endpoints.js
 ```
 
 ## Environment Configuration
@@ -127,6 +144,12 @@ GRAPHITI_SERVICE_URL=http://localhost:8000 (default)
 - **utils/briefing.ts**: Briefing generation logic
 - **utils/audio.ts**: Audio capture/playback utilities
 - **utils/apiKey.ts**: API key validation and storage
+- **utils/supabase.ts**: Supabase database operations and client configuration
+- **utils/graphManagement.ts**: Graph operations, maintenance, and data manipulation utilities
+- **utils/workstreamMigration.ts**: Workstream data migration and transformation utilities
+- **utils/workstreamSummaries.ts**: Workstream data summarization and analysis functions
+- **utils/notes.ts**: Note management and CRUD operations
+- **utils/networkStatus.ts**: Network connectivity monitoring and status reporting
 
 ### Key Patterns
 - **Caching**: Graph data cached for 5 seconds in `knowledgeGraph.ts` to prevent excessive API calls
@@ -220,32 +243,161 @@ GRAPHITI_SERVICE_URL=http://localhost:8000 (default)
 - Graphiti: 8000 (configurable via `GRAPHITI_SERVICE_URL`)
 - Pieces MCP: 39300 (hardcoded, requires local Pieces installation)
 
-## Testing & Debugging
+## Testing & Quality Assurance
 
-### Check All Services Running
+### Test Files & Utilities
 ```bash
-# Frontend
-curl http://localhost:3000
+# Project-level testing scripts
+node test-all-endpoints.js     # Comprehensive API endpoint testing
+node test-briefing.js          # Test briefing generation
+node test-refresh.js           # Test data refresh functionality
 
-# Backend
-curl http://localhost:3002/api/graph/health
+# Backend testing
+cd backend
+node test_pieces_data.js       # Test Pieces MCP integration
+DEBUG=* npm run dev           # Enable comprehensive debug logging
+```
 
-# Graphiti
+### Manual Testing Procedures
+```bash
+# Check All Services Running
+curl http://localhost:3000     # Frontend health check
+curl http://localhost:3002/api/graph/health  # Backend + Graphiti health
+curl http://localhost:8000/health  # Graphiti service health
+curl http://localhost:39300     # Pieces MCP service (if running)
+
+# Test Graphiti API directly
+curl -X POST http://localhost:8000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query":"test entities"}'
+
+# Test backend API endpoints
+curl http://localhost:3002/api/graph/data
+curl -X POST http://localhost:3002/api/graph/conversation \
+  -H "Content-Type: application/json" \
+  -d '{"conversation":"test conversation"}'
+```
+
+### Debugging Tools & Techniques
+- **Frontend**: Browser dev tools, localStorage inspection (`alfie-graph-positions`)
+- **Backend**: `DEBUG=*` environment variable for verbose logging
+- **Graphiti**: FastAPI auto-generated docs at `http://localhost:8000/docs`
+- **Network**: Use browser Network tab to inspect API calls and responses
+- **3D Graph**: Use SPREAD button to test physics simulation
+
+### Clear Application State
+- Clear graph data: Use SettingsView "Clear Graph" button
+- Clear localStorage: `localStorage.clear()` in browser console
+- Reset node positions: Remove `alfie-graph-positions` from localStorage
+- Restart services: Kill and restart all three servers
+
+## Common Issues & Troubleshooting
+
+### Port Conflicts
+- **Frontend**: Vite auto-increments from 3000 if port is busy
+- **Backend**: Default 3002, configurable via `PORT` environment variable
+- **Graphiti**: Default 8000, configurable via `GRAPHITI_SERVICE_URL`
+- **Pieces MCP**: Hardcoded to 39300 (requires local Pieces installation)
+
+### Environment Variable Issues
+```bash
+# Missing API keys cause startup failure
+ERROR: Missing required API keys in environment variables
+Set LINEAR_API_KEY and NOTION_API_KEY before starting the server
+
+# Solution: Create .env files with proper keys
+# Frontend .env.local
+GEMINI_API_KEY=your_key_here
+LINEAR_API_KEY=your_key_here
+NOTION_API_KEY=your_key_here
+
+# Backend .env
+PORT=3002
+GRAPHITI_SERVICE_URL=http://localhost:8000
+```
+
+### Service Connectivity Issues
+```bash
+# Test Graphiti service connectivity
 curl http://localhost:8000/health
 
-# Pieces (if needed)
+# Test backend health
+curl http://localhost:3002/api/graph/health
+
+# Test Pieces MCP (if running)
 curl http://localhost:39300
 ```
 
-### Clear Application State
-- Clear graph: Use SettingsView "Clear Graph" button
-- Clear localStorage: `localStorage.clear()` in browser console
-- Restart services: Kill and restart all three servers
+### 3D Graph Performance Issues
+- **High node count**: Can cause browser lag, reduce graph data size
+- **Physics simulation**: Use SPREAD button to redistribute nodes
+- **Memory leaks**: Clear browser localStorage if experiencing issues
+- **Three.js errors**: Check browser console for WebGL support
+
+### Data Sync Issues
+- **Cache invalidation**: Graph data cached for 5 seconds, may need manual refresh
+- **Node position persistence**: Check `alfie-graph-positions` in localStorage
+- **Conversation data**: Verify `addConversationToGraph()` completes successfully
+- **Entity extraction**: Check Graphiti service logs for processing errors
+
+### MCP Integration Issues
+- **Pieces not running**: Start Pieces OS before backend
+- **SSE connection failures**: Check `http://localhost:39300/model_context_protocol/2024-11-05/sse`
+- **EventSource polyfill**: Ensure proper Node.js EventSource polyfill loaded
+- **CORS issues**: Verify Pieces allows connections from localhost
+
+### Supabase Integration Issues
+- **Connection errors**: Check `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
+- **Authentication**: Verify proper Supabase auth configuration
+- **Real-time subscriptions**: Check network status and WebSocket connections
 
 ## Deployment Notes
 
-- Frontend: Deploy static build to Vercel or similar
-- Backend: Deploy to Railway, Heroku, or traditional servers
-- Graphiti: Containerize with provided Dockerfile, deploy to any container platform
-- Ensure environment variables set on deployment platform
-- CORS configured to allow frontend origin
+### Production Considerations
+- **Environment variables**: Must be set on deployment platform
+- **CORS**: Configure to allow production frontend origin
+- **Database**: Use production Neo4j or Supabase instances
+- **API security**: Never commit API keys to version control
+
+### Frontend Deployment
+- **Vercel**: Deploy static build from `dist/` directory
+- **Netlify**: Alternative static site deployment
+- **Docker**: Use provided Dockerfile for containerized deployment
+
+### Backend Deployment
+- **Railway**: Recommended for Node.js Express servers
+- **Heroku**: Traditional platform option
+- **Docker**: Containerize with separate Dockerfile
+- **PM2**: Process management for traditional servers
+
+### Graphiti Service Deployment
+- **Docker**: Use provided `graphiti-service/Dockerfile`
+- **Railway/Heroiku**: Python-compatible platforms
+- **AWS/Azure**: Container orchestration platforms
+- **Environment**: Configure Graphiti credentials for production
+
+## Advanced Architecture Patterns
+
+### Temporal Knowledge Graph Management
+- **Entity Extraction**: Graphiti service automatically extracts entities and relationships from conversations
+- **Temporal Validity**: Entities maintain "valid_at" timestamps for time-based context
+- **Relationship Mapping**: Dynamic linking between entities with confidence scores
+- **Context Evolution**: Knowledge graph evolves as new conversations are processed
+
+### Microservices Communication
+- **Backend Proxy**: Express server proxies requests to Graphiti and Pieces MCP
+- **SSE Integration**: Server-Sent Events for real-time communication with Pieces
+- **Health Monitoring**: Comprehensive health checks across all services
+- **Error Propagation**: Graceful error handling and fallback mechanisms
+
+### State Management Patterns
+- **Frontend Caching**: 5-second graph data cache to prevent API overload
+- **Position Persistence**: localStorage for node positions (visual state, not data)
+- **Event System**: Custom `graphDataUpdated` events for reactive UI updates
+- **Conversation History**: Full conversation logging with temporal markers
+
+### 3D Visualization Architecture
+- **Force-Directed Layout**: D3-force physics simulation for node positioning
+- **Three.js Integration**: Custom materials and shaders for neon effects
+- **Performance Optimization**: Efficient rendering for large node counts
+- **Interactive Controls**: Orbit controls with zoom, pan, and rotation
