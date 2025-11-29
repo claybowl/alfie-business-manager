@@ -1220,6 +1220,124 @@ app.delete('/api/graph/clear', async (req, res) => {
     }
 });
 
+// ============================================================================
+// BULK NODE DELETION ENDPOINTS
+// ============================================================================
+
+// Delete nodes by date range
+app.delete('/api/graph/nodes/by-date', async (req, res) => {
+    try {
+        const { beforeDate, afterDate } = req.query;
+        if (!beforeDate) {
+            return res.status(400).json({ error: 'beforeDate parameter required' });
+        }
+
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/nodes?beforeDate=${beforeDate}${afterDate ? `&afterDate=${afterDate}` : ''}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Error deleting nodes by date:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Delete nodes by type/source
+app.delete('/api/graph/nodes/by-type', async (req, res) => {
+    try {
+        const { type } = req.query;
+        if (!type) {
+            return res.status(400).json({ error: 'type parameter required (linear, notion, pieces, etc.)' });
+        }
+
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/nodes?type=${encodeURIComponent(type)}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Error deleting nodes by type:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Delete nodes by label/category
+app.delete('/api/graph/nodes/by-label', async (req, res) => {
+    try {
+        const { label } = req.query;
+        if (!label) {
+            return res.status(400).json({ error: 'label parameter required' });
+        }
+
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/nodes?label=${encodeURIComponent(label)}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Error deleting nodes by label:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Get deletion statistics before performing deletion
+app.get('/api/graph/deletion-stats', async (req, res) => {
+    try {
+        const { beforeDate, afterDate, type, label } = req.query;
+
+        // Get all nodes and calculate what would be deleted
+        const response = await fetch(`${GRAPHITI_SERVICE_URL}/nodes`);
+        const data = await response.json();
+
+        let nodes = data.nodes || [];
+        let stats = {
+            totalNodes: nodes.length,
+            toDelete: 0,
+            byDateRange: 0,
+            byType: 0,
+            byLabel: 0,
+            preview: []
+        };
+
+        // Apply filters to calculate what would be deleted
+        if (beforeDate || afterDate) {
+            const nodesToDelete = nodes.filter(n => {
+                if (beforeDate && new Date(n.createdAt) > new Date(beforeDate)) return false;
+                if (afterDate && new Date(n.createdAt) < new Date(afterDate)) return false;
+                return true;
+            });
+            stats.byDateRange = nodesToDelete.length;
+            stats.toDelete += nodesToDelete.length;
+        }
+
+        if (type) {
+            const nodesToDelete = nodes.filter(n => n.type === type);
+            stats.byType = nodesToDelete.length;
+            if (!beforeDate && !afterDate) stats.toDelete = nodesToDelete.length;
+        }
+
+        if (label) {
+            const nodesToDelete = nodes.filter(n => n.label === label);
+            stats.byLabel = nodesToDelete.length;
+            if (!beforeDate && !afterDate && !type) stats.toDelete = nodesToDelete.length;
+        }
+
+        // Show first 5 nodes that would be deleted
+        stats.preview = nodes.slice(0, 5).map(n => ({
+            id: n.id,
+            name: n.name,
+            type: n.type,
+            createdAt: n.createdAt
+        }));
+
+        res.json(stats);
+    } catch (error) {
+        console.error('Error getting deletion stats:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 app.listen(PORT, () => {
   console.log(`Backend server running on http://localhost:${PORT}`);
   console.log('Data sources:');
