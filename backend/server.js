@@ -34,53 +34,66 @@ async function connectToPieces() {
   try {
     console.log('Connecting to Pieces MCP via SSE...');
     const transport = new SSEClientTransport(new URL(PIECES_SSE_URL));
-    
-    mcpClient = new Client(
-      { 
-        name: "alfie-client", 
-        version: "1.0.0" 
-      }, 
-      { 
+
+    const client = new Client(
+      {
+        name: "alfie-client",
+        version: "1.0.0"
+      },
+      {
         capabilities: {
             prompts: {},
             resources: {},
             tools: {}
-        } 
+        }
       }
     );
 
-    await mcpClient.connect(transport);
-    console.log('✓ Connected to Pieces OS MCP server');
+    await client.connect(transport);
     
+    // Only set mcpClient after successful connection
+    mcpClient = client;
+    
+    console.log('✓ Connected to Pieces OS MCP server');
+
     // List tools to see what we have
     const tools = await mcpClient.listTools();
     console.log('Available tools:', tools.tools.map(t => t.name));
-    
+
     return true;
   } catch (error) {
-    console.error('Failed to connect to Pieces MCP:', error);
+    console.warn('Pieces MCP not available (optional). Linear & Notion integrations active.');
+    mcpClient = null;
     return false;
   }
 }
 
-// Initialize connection
-connectToPieces();
+// Initialize connection with error suppression
+(async () => {
+  await connectToPieces();
+})();
 
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok',
-    mcp_connected: !!mcpClient
+    mcp_connected: !!mcpClient,
+    pieces_ready: mcpClient !== null
   });
 });
 
 app.get('/api/pieces/tools', async (req, res) => {
   if (!mcpClient) {
-    return res.status(503).json({ error: 'MCP client not connected' });
+    return res.status(503).json({ 
+      error: 'MCP client not connected', 
+      message: 'Pieces OS is not running or connection failed. Make sure Pieces OS is installed and running on port 39300.',
+      piecesUrl: PIECES_SSE_URL
+    });
   }
   try {
     const result = await mcpClient.listTools();
     res.json(result);
   } catch (error) {
+    console.error('Error listing Pieces tools:', error);
     res.status(500).json({ error: error.message });
   }
 });

@@ -415,6 +415,9 @@ function extractProjectsFromContent(
 
   // Add found projects, tracking activity count
   foundProjects.forEach(projectName => {
+    // Skip null/undefined/empty project names
+    if (!projectName || typeof projectName !== 'string') return;
+    
     if (!activeProjects.has(projectName)) {
       activeProjects.set(projectName, {
         name: projectName,
@@ -438,14 +441,17 @@ function extractProjectFromEvent(
   const projectMatch = e.window_title?.match(/([^-]+)\s*-\s*([^-]+)\s*-/);
   if (projectMatch) {
     const projectName = projectMatch[2]?.trim() || projectMatch[1]?.trim();
-    if (projectName && !activeProjects.has(projectName)) {
+    // Skip null/undefined/empty project names
+    if (!projectName || typeof projectName !== 'string' || projectName.length === 0) return;
+    
+    if (!activeProjects.has(projectName)) {
       activeProjects.set(projectName, {
         name: projectName,
         lastAccessed: event.readableTime,
         app: event.app.replace('.exe', ''),
         activityCount: 1
       });
-    } else if (projectName) {
+    } else {
       const existing = activeProjects.get(projectName)!;
       existing.activityCount++;
     }
@@ -527,6 +533,9 @@ function enhanceProjectActivityFromSources(
   // Scan Linear issues for project mentions
   linearIssues.forEach(issue => {
     projectNames.forEach(projectName => {
+      // Skip null/undefined/empty project names
+      if (!projectName || typeof projectName !== 'string') return;
+      
       const projectLower = projectName.toLowerCase();
       const issueText = `${issue.title} ${issue.project || ''}`.toLowerCase();
 
@@ -540,6 +549,9 @@ function enhanceProjectActivityFromSources(
   // Scan Notion pages for project mentions
   notionPages.forEach(page => {
     projectNames.forEach(projectName => {
+      // Skip null/undefined/empty project names
+      if (!projectName || typeof projectName !== 'string') return;
+      
       const projectLower = projectName.toLowerCase();
       const pageText = `${page.title} ${page.content || ''}`.toLowerCase();
 

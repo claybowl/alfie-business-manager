@@ -15,7 +15,12 @@
       "Bash(npx pnpm install)",
       "Bash(CI=true npx pnpm install:*)",
       "Bash(timeout 120s npx pnpm install:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(curl:*)",
+      "Bash(ss:*)",
+      "Bash(lsof:*)",
+      "Bash(netstat:*)",
+      "Bash(pkill:*)"
     ],
     "deny": [],
     "ask": []
