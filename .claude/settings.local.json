@@ -27,7 +27,8 @@
       "Bash(set:*)",
       "Bash(set GRAPHITI_SERVICE_URL=http://localhost:8500:*)",
       "Bash(taskkill:*)",
-      "Bash($env:PORT=3002 $env:GRAPHITI_SERVICE_URL=http://localhost:8500 npm run dev)"
+      "Bash($env:PORT=3002 $env:GRAPHITI_SERVICE_URL=http://localhost:8500 npm run dev)",
+      "Bash(PORT=3005 npm run dev:*)"
     ],
     "deny": [],
     "ask": []

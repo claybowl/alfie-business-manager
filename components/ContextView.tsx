@@ -18,36 +18,110 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const THEME = {
-  // Node colors by group - vibrant neon palette
+  // Node colors by group - Enhanced neon palette for brain-like effect
   nodeColors: {
-    person: { primary: '#ff6b9d', glow: '#ff6b9d80' },       // Hot pink
-    place: { primary: '#00f5d4', glow: '#00f5d480' },        // Cyan
-    organization: { primary: '#fee440', glow: '#fee44080' }, // Yellow
-    concept: { primary: '#9b5de5', glow: '#9b5de580' },      // Purple
-    object: { primary: '#00bbf9', glow: '#00bbf980' },       // Blue
-    event: { primary: '#f15bb5', glow: '#f15bb580' },        // Magenta
-    tool: { primary: '#00ff88', glow: '#00ff8880' },         // Neon green
-    project: { primary: '#ff9f1c', glow: '#ff9f1c80' },      // Orange
-    Entity: { primary: '#6c757d', glow: '#6c757d40' },       // Gray (fallback)
-    default: { primary: '#6c757d', glow: '#6c757d40' }       // Gray
+    person: { primary: '#f472b6', glow: '#f472b6cc' },       // Hot pink
+    place: { primary: '#4ade80', glow: '#4ade80dd' },        // Neon green
+    organization: { primary: '#a78bfa', glow: '#a78bfadd' }, // Purple
+    concept: { primary: '#c084fc', glow: '#c084fccc' },      // Light purple
+    object: { primary: '#60a5fa', glow: '#60a5fadd' },       // Light blue
+    event: { primary: '#fb7185', glow: '#fb7185dd' },        // Pink
+    tool: { primary: '#34d399', glow: '#34d399ee' },         // Mint green
+    project: { primary: '#fbbf24', glow: '#fbbf24dd' },      // Amber
+    Entity: { primary: '#22d3ee', glow: '#22d3eecc' },       // Cyan (fallback)
+    default: { primary: '#22d3ee', glow: '#22d3eecc' }       // Cyan
   },
   // Link colors
   link: {
-    default: 'rgba(0, 245, 212, 0.25)',
-    highlighted: 'rgba(0, 245, 212, 0.9)',
-    dimmed: 'rgba(0, 245, 212, 0.08)'
+    default: 'rgba(0, 255, 221, 0.45)',
+    highlighted: 'rgba(0, 255, 221, 1.0)',
+    dimmed: 'rgba(0, 255, 221, 0.15)'
   },
-  // Background
+  // Background - Enhanced brain-like neural network
   bg: {
     primary: '#0a0a0f',
-    grid: 'rgba(0, 245, 212, 0.03)',
-    vignette: 'radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.4) 100%)'
+    grid: 'rgba(147, 51, 234, 0.04)', // Purple grid instead of cyan
+    vignette: 'radial-gradient(ellipse at center, rgba(147, 51, 234, 0.1) 0%, rgba(0,0,0,0.6) 100%)', // Purple vignette
+    neuralPattern: 'radial-gradient(circle at 30% 40%, rgba(236, 72, 153, 0.08) 0%, transparent 25%), radial-gradient(circle at 70% 60%, rgba(74, 222, 128, 0.08) 0%, transparent 25%)'
   },
-  // Text
+  // Text - Varied color palette
   text: {
-    primary: '#ffffff',
-    secondary: '#a0a0a0',
-    accent: '#00f5d4'
+    primary: '#fbbf24',        // Amber
+    secondary: '#a78bfa',      // Purple
+    accent: '#06b6d4',        // Turquoise
+    relationship: {
+      primary: '#4ade80',      // Neon green
+      secondary: '#f472b6',    // Hot pink
+      accent: '#60a5fa',      // Light blue
+      warning: '#fbbf24',     // Yellow
+      error: '#ec4899'        // Magenta
+    }
+  },
+  // Text rendering styles following Graphiti best practices
+  textStyles: {
+    // Node labels - hierarchical approach
+    node: {
+      primary: {
+        font: 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        color: '#ffffff',
+        shadowColor: 'rgba(0, 0, 0, 0.8)',
+        shadowBlur: 3,
+        alpha: 1.0
+      },
+      secondary: {
+        font: '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        color: '#a0a0a0',
+        shadowColor: 'rgba(0, 0, 0, 0.6)',
+        shadowBlur: 2,
+        alpha: 0.8
+      },
+      compact: {
+        font: 'bold 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        color: '#ffffff',
+        shadowColor: 'rgba(0, 0, 0, 0.7)',
+        shadowBlur: 2,
+        alpha: 0.9
+      }
+    },
+    // Relationship labels
+    relationship: {
+      primary: {
+        font: '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        color: '#00ff88',
+        shadowColor: 'rgba(0, 0, 0, 0.9)',
+        shadowBlur: 4,
+        alpha: 1.0
+      },
+      secondary: {
+        font: '9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        color: '#ff6b9d',
+        shadowColor: 'rgba(0, 0, 0, 0.8)',
+        shadowBlur: 3,
+        alpha: 0.9
+      },
+      accent: {
+        font: '10px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        color: '#00f5d4',
+        shadowColor: 'rgba(0, 0, 0, 0.8)',
+        shadowBlur: 3,
+        alpha: 1.0
+      }
+    },
+    // Background containers - Transparent purple brain-like effect
+    background: {
+      node: {
+        fill: 'rgba(147, 51, 234, 0.15)', // Transparent purple
+        stroke: 'rgba(236, 72, 153, 0.4)', // Neon pink border
+        strokeWidth: 1.5,
+        borderRadius: 6
+      },
+      relationship: {
+        fill: 'rgba(139, 92, 246, 0.12)', // Lighter transparent purple
+        stroke: 'rgba(74, 222, 128, 0.3)', // Neon green border
+        strokeWidth: 1,
+        borderRadius: 4
+      }
+    }
   }
 };
 
@@ -171,6 +245,9 @@ function inferEntityType(name: string, summary?: string): string {
 
 export const ContextView: React.FC = () => {
   const [graphData, setGraphData] = useState<KnowledgeGraphData>({ nodes: [], links: [] });
+
+  // Memoize graphData to prevent unnecessary ForceGraph2D re-renders
+  const memoizedGraphData = useMemo(() => graphData, [JSON.stringify(graphData.nodes), JSON.stringify(graphData.links)]);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
@@ -238,19 +315,27 @@ export const ContextView: React.FC = () => {
     };
   }, []);
 
-  // Particle animation loop - trigger re-render via state update
+  // Particle animation loop - use throttled state updates to prevent flicker
   useEffect(() => {
     if (!showParticles || graphData.links.length === 0) return;
 
-    const animate = () => {
+    let lastUpdate = 0;
+    const throttleMs = 16; // ~60fps max
+
+    const animate = (timestamp: number) => {
       particlesRef.current.forEach((particles) => {
         particles.forEach(p => {
           p.progress += p.speed;
           if (p.progress > 1) p.progress = 0;
         });
       });
-      // Trigger canvas redraw by updating tick
-      setParticleTick(t => (t + 1) % 1000);
+
+      // Throttle state updates to prevent excessive re-renders
+      if (timestamp - lastUpdate > throttleMs) {
+        setParticleTick(t => (t + 1) % 1000);
+        lastUpdate = timestamp;
+      }
+
       animationRef.current = requestAnimationFrame(animate);
     };
 
@@ -346,25 +431,452 @@ export const ContextView: React.FC = () => {
     return inferEntityType(node.id, node.summary);
   }, []);
 
-  // Intelligently abbreviate relationship text
+  // Split text into two rows for better readability
+  const splitTextIntoRows = useCallback((text: string, maxLength: number = 8): [string, string] => {
+    if (!text) return ['', ''];
+
+    const words = text.split(/\s+/);
+    if (words.length === 0) return ['', ''];
+
+    // If text is short, return it as single row
+    if (text.length <= maxLength) {
+      return [text, ''];
+    }
+
+    // Try to split by word boundary
+    let firstRow = '';
+    let secondRow = '';
+
+    for (const word of words) {
+      if ((firstRow + ' ' + word).length <= maxLength) {
+        firstRow += (firstRow ? ' ' : '') + word;
+      } else {
+        secondRow += (secondRow ? ' ' : '') + word;
+      }
+    }
+
+    // If first row is empty, force split by character count
+    if (!firstRow) {
+      firstRow = text.substring(0, maxLength);
+      secondRow = text.substring(maxLength);
+    }
+
+    return [firstRow.trim(), secondRow.trim()];
+  }, []);
+
+  // Get relationship text color based on type
+  const getRelationshipColor = useCallback((text: string): string => {
+    const lower = text.toLowerCase();
+
+    // Directional relationships
+    if (['→', '←', 'creates', 'created by', 'manages', 'managed by', 'works on', 'assigned to'].includes(lower)) {
+      return THEME.text.relationship.primary;
+    }
+
+    // Bidirectional relationships
+    if (['↔', 'relates to', 'works with', 'collaborates with'].includes(lower)) {
+      return THEME.text.relationship.accent;
+    }
+
+    // Warning/error relationships
+    if (['depends on', 'required', 'error', 'problem'].some(word => lower.includes(word))) {
+      return THEME.text.relationship.warning;
+    }
+
+    // Default to secondary color
+    return THEME.text.relationship.secondary;
+  }, []);
+
+  // Professional text rendering utilities following Graphiti best practices
+  const renderTextWithBackground = useCallback((
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    style: any,
+    options: {
+      maxWidth?: number;
+      lineHeight?: number;
+      textAlign?: CanvasTextAlign;
+      background?: any;
+      ellipsis?: string;
+    } = {}
+  ) => {
+    // Handle undefined/null text and ensure it's a string
+    if (!text) {
+      text = '';
+    }
+    text = String(text);
+
+    const {
+      maxWidth = 200,
+      lineHeight = 14,
+      textAlign = 'center',
+      background = THEME.textStyles.background.relationship,
+      ellipsis = '...'
+    } = options;
+
+    ctx.save();
+
+    // Apply text style
+    ctx.font = style.font;
+    ctx.fillStyle = style.color;
+    ctx.textAlign = textAlign;
+    ctx.textBaseline = 'middle';
+    ctx.globalAlpha = style.alpha;
+
+    // Apply shadow
+    ctx.shadowColor = style.shadowColor;
+    ctx.shadowBlur = style.shadowBlur;
+
+    // Handle text wrapping if needed
+    const words = text.split(' ');
+    if (words.length > 1 && ctx.measureText(text).width > maxWidth) {
+      // Multi-line rendering with smart wrapping
+      let lines: string[] = [];
+      let currentLine = '';
+
+      for (const word of words) {
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+        if (ctx.measureText(testLine).width <= maxWidth) {
+          currentLine = testLine;
+        } else {
+          if (currentLine) {
+            lines.push(currentLine);
+            currentLine = word;
+          } else {
+            // Force break word if it's too long
+            const truncatedWord = word.substring(0, Math.floor(maxWidth / ctx.measureText('M').width));
+            lines.push(truncatedWord);
+            currentLine = word.substring(truncatedWord.length);
+          }
+        }
+      }
+      if (currentLine) {
+        lines.push(currentLine);
+      }
+
+      // Calculate total height for multi-line text
+      const totalHeight = lines.length * lineHeight;
+
+      // Draw background for multi-line text
+      if (lines.length > 1) {
+        const bgWidth = Math.max(...lines.map(line => ctx.measureText(line).width)) + (background.borderRadius * 2);
+        const bgHeight = totalHeight + (background.borderRadius * 2);
+
+        const rectX = x - (bgWidth / 2);
+        const rectY = y - (bgHeight / 2);
+
+        // Draw rounded rectangle background
+        ctx.fillStyle = background.fill;
+        ctx.beginPath();
+        ctx.moveTo(rectX + background.borderRadius, rectY);
+        ctx.lineTo(rectX + bgWidth - background.borderRadius, rectY);
+        ctx.quadraticCurveTo(rectX + bgWidth, rectY, rectX + bgWidth, rectY + background.borderRadius);
+        ctx.lineTo(rectX + bgWidth, rectY + bgHeight - background.borderRadius);
+        ctx.quadraticCurveTo(rectX + bgWidth, rectY + bgHeight, rectX + bgWidth - background.borderRadius, rectY + bgHeight);
+        ctx.lineTo(rectX + background.borderRadius, rectY + bgHeight);
+        ctx.quadraticCurveTo(rectX, rectY + bgHeight, rectX, rectY + bgHeight - background.borderRadius);
+        ctx.lineTo(rectX, rectY + background.borderRadius);
+        ctx.quadraticCurveTo(rectX, rectY, rectX + background.borderRadius, rectY);
+        ctx.closePath();
+        ctx.fill();
+
+        // Draw border if specified
+        if (background.strokeWidth > 0) {
+          ctx.strokeStyle = background.stroke;
+          ctx.lineWidth = background.strokeWidth;
+          ctx.stroke();
+        }
+      }
+
+      // Draw each line
+      lines.forEach((line, index) => {
+        const lineY = y - (totalHeight / 2) + (index * lineHeight) + (lineHeight / 2);
+        ctx.fillText(line, x, lineY);
+      });
+
+    } else {
+      // Single line rendering
+      const textWidth = ctx.measureText(text).width;
+
+      // Draw background for single line
+      if (background) {
+        const bgWidth = textWidth + (background.borderRadius * 2);
+        const bgHeight = lineHeight + (background.borderRadius * 2);
+        const rectX = x - (bgWidth / 2);
+        const rectY = y - (bgHeight / 2);
+
+        // Draw rounded rectangle background
+        ctx.fillStyle = background.fill;
+        ctx.beginPath();
+        ctx.moveTo(rectX + background.borderRadius, rectY);
+        ctx.lineTo(rectX + bgWidth - background.borderRadius, rectY);
+        ctx.quadraticCurveTo(rectX + bgWidth, rectY, rectX + bgWidth, rectY + background.borderRadius);
+        ctx.lineTo(rectX + bgWidth, rectY + bgHeight - background.borderRadius);
+        ctx.quadraticCurveTo(rectX + bgWidth, rectY + bgHeight, rectX + bgWidth - background.borderRadius, rectY + bgHeight);
+        ctx.lineTo(rectX + background.borderRadius, rectY + bgHeight);
+        ctx.quadraticCurveTo(rectX, rectY + bgHeight, rectX, rectY + bgHeight - background.borderRadius);
+        ctx.lineTo(rectX, rectY + background.borderRadius);
+        ctx.quadraticCurveTo(rectX, rectY, rectX + background.borderRadius, rectY);
+        ctx.closePath();
+        ctx.fill();
+
+        // Draw border if specified
+        if (background.strokeWidth > 0) {
+          ctx.strokeStyle = background.stroke;
+          ctx.lineWidth = background.strokeWidth;
+          ctx.stroke();
+        }
+      }
+
+      // Draw text
+      ctx.fillText(text, x, y);
+    }
+
+    ctx.restore();
+  }, []);
+
+  // Smart node name truncation with full name preservation
+  const getNodeDisplayName = useCallback((node: Node | any): { display: string; tooltip: string } => {
+    // Handle undefined/null nodes
+    if (!node || !node.id) {
+      return { display: 'Entity', tooltip: 'Unknown Entity' };
+    }
+
+    const maxLength = 12;
+
+    if (node.id.length <= maxLength) {
+      return { display: node.id, tooltip: node.id };
+    }
+
+    // Try to split on word boundaries first
+    const words = node.id.split(/[\s-_./]+/);
+    if (words.length > 1) {
+      // Check if we can make a meaningful abbreviation
+      let abbreviation = '';
+      let remainingText = node.id;
+
+      // Common abbreviations for development/project contexts
+      const commonAbbrevs: Record<string, string> = {
+        'project': 'proj',
+        'application': 'app',
+        'service': 'svc',
+        'component': 'comp',
+        'interface': 'iface',
+        'database': 'db',
+        'module': 'mod',
+        'function': 'func',
+        'class': 'cls',
+        'test': 'test',
+        'api': 'api',
+        'web': 'web',
+        'mobile': 'mob',
+        'desktop': 'desk',
+        'server': 'srv',
+        'client': 'cli',
+        'admin': 'adm',
+        'user': 'usr',
+        'auth': 'auth',
+        'config': 'cfg',
+        'utils': 'util',
+        'helpers': 'help',
+        'types': 'type',
+        'constants': 'const',
+        'services': 'svc',
+        'controllers': 'ctrl',
+        'models': 'mdl',
+        'views': 'view',
+        'routes': 'route',
+        'middleware': 'mid',
+        'validation': 'val',
+        'authentication': 'auth',
+        'authorization': 'authz',
+        'business': 'biz',
+        'logic': 'logic',
+        'rules': 'rule',
+      };
+
+      // Try to abbreviate common words
+      for (const [full, abbrev] of Object.entries(commonAbbrevs)) {
+        if (node.id.toLowerCase().includes(full)) {
+          const abbreviated = node.id.toLowerCase().replace(
+            new RegExp(full, 'gi'),
+            abbrev
+          );
+          if (abbreviated.length <= maxLength) {
+            return {
+              display: abbreviated.charAt(0).toUpperCase() + abbreviated.slice(1),
+              tooltip: node.id
+            };
+          }
+        }
+      }
+
+      // Fallback: first meaningful words
+      let result = '';
+      for (const word of words) {
+        if ((result + word).length <= maxLength - 1) {
+          result += (result ? ' ' : '') + word;
+        } else {
+          break;
+        }
+      }
+      return {
+        display: result.length > 0 ? result + '...' : node.id.substring(0, maxLength - 1) + '...',
+        tooltip: node.id
+      };
+    }
+
+    // Last resort: character-based truncation
+    return {
+      display: node.id.substring(0, maxLength - 1) + '...',
+      tooltip: node.id
+    };
+  }, []);
+
+  // Intelligently abbreviate relationship text with comprehensive shorthand
   const abbreviateRelationship = useCallback((text: string): string => {
     if (!text) return '';
 
-    // Common relationship verbs - replace with symbols
+    // Comprehensive relationship mappings with meaningful shorthand
     const abbreviations: Record<string, string> = {
+      // Basic relationships
       'relates to': '↔',
+      'related to': '↔',
+      'connection': '↔',
+      'linked to': '↔',
+      'associated with': '↔',
+
+      // Directional relationships
       'mentions': '→',
       'mentioned by': '←',
+      'references': '→',
+      'referenced by': '←',
+      'cites': '→',
+      'cited by': '←',
+      'points to': '→',
+      'pointed to by': '←',
+
+      // Creation relationships
       'creates': '→',
       'created by': '←',
+      'generated': '→',
+      'generated by': '←',
+      'produced': '→',
+      'produced by': '←',
+      'built': '→',
+      'built by': '←',
+      'developed': '→',
+      'developed by': '←',
+      'wrote': '→',
+      'written by': '←',
+      'authored': '→',
+      'authored by': '←',
+
+      // Work relationships
       'works on': '→',
       'works with': '↔',
-      'manages': '→',
+      'collaborates with': '↔',
+      'partnered with': '↔',
+      'team with': '↔',
+      'assigned to': '→',
       'managed by': '←',
+      'manages': '→',
+      'leads': '→',
+      'led by': '←',
+
+      // Dependency relationships
       'depends on': '→',
+      'dependent on': '→',
       'required by': '←',
+      'requires': '→',
+      'needs': '→',
+      'needed by': '←',
+      'relies on': '→',
+      'relies on by': '←',
+
+      // Ownership relationships
       'has': '→',
+      'has a': '→',
+      'owned by': '←',
+      'owns': '→',
+      'possesses': '→',
+      'possessed by': '←',
+
+      // Composition relationships
       'part of': '←',
+      'component of': '←',
+      'member of': '←',
+      'contains': '→',
+      'included in': '←',
+      'subset of': '←',
+
+      // Discussion/Communication
+      'discusses': '→',
+      'discussed by': '←',
+      'talks about': '→',
+      'talked about by': '←',
+      'conversation about': '↔',
+      'chat about': '↔',
+
+      // Project/Task relationships
+      'task for': '→',
+      'responsible for': '→',
+      'reviewed': '→',
+      'reviewed by': '←',
+      'approved': '→',
+      'approved by': '←',
+
+      // Learning/Knowledge
+      'learns about': '→',
+      'learned from': '←',
+      'studies': '→',
+      'studied by': '←',
+      'researched': '→',
+      'researched by': '←',
+
+      // Business relationships
+      'reports to': '→',
+      'reported by': '←',
+      'supervises': '→',
+      'supervised by': '←',
+
+      // File/Code relationships
+      'imports': '→',
+      'imported by': '←',
+      'includes': '→',
+      'included by': '←',
+      'uses': '→',
+      'used by': '←',
+      'calls': '→',
+      'called by': '←',
+
+      // Time-based relationships
+      'happened before': '→',
+      'happened after': '→',
+      'preceded by': '←',
+      'followed by': '→',
+
+      // General action relationships
+      'affects': '→',
+      'affected by': '←',
+      'influences': '→',
+      'influenced by': '←',
+      'impacts': '→',
+      'impacted by': '←',
+      'changes': '→',
+      'changed by': '←',
+
+      // Process relationships
+      'starts': '→',
+      'started by': '←',
+      'begins': '→',
+      'begun by': '←',
+      'ends': '→',
+      'ended by': '←',
+      'finishes': '→',
+      'finished by': '←',
     };
 
     const lower = text.toLowerCase().trim();
@@ -374,13 +886,81 @@ export const ContextView: React.FC = () => {
       return abbreviations[lower];
     }
 
-    // For longer text, use first 2-3 words or shorten to 12 chars max
+    // Pattern-based intelligent abbreviation for longer text
     if (text.length > 12) {
-      const words = text.split(/\s+/);
-      if (words.length >= 2) {
-        return words.slice(0, 2).join(' ').substring(0, 12) + '...';
+      // Try to extract meaningful keywords and create shorthand
+      const words = text.toLowerCase().split(/\s+/);
+
+      // Common patterns for intelligent shorthand
+      if (words.length >= 3) {
+        // Check for common relationship patterns
+        const patterns = [
+          // [contains these words, abbreviation]
+          [['working', 'on'], 'work→'],
+          [['worked', 'with'], 'work↔'],
+          [['discussion', 'about'], 'talk↔'],
+          [['conversation', 'about'], 'chat↔'],
+          [['depends', 'on'], 'dep→'],
+          [['related', 'to'], '↔'],
+          [['belongs', 'to'], '∈'],
+          [['part', 'of'], '⊂'],
+          [['connected', 'to'], '↔'],
+          [['associated', 'with'], '↔'],
+          [['collaborated', 'with'], '↔'],
+          [['managed', 'by'], 'mgr←'],
+          [['manages'], 'mgr→'],
+          [['created', 'by'], '←by'],
+          [['creates'], '→'],
+          [['mentioned'], '→'],
+          [['referenced'], '→'],
+          [['discussed'], '→'],
+          [['reviewed'], '→'],
+          [['assigned'], '→'],
+          [['responsible'], '→'],
+        ];
+
+        // Check each pattern
+        for (const [pattern, shorthand] of patterns) {
+          if (Array.isArray(pattern) && pattern.every(word => words.includes(word))) {
+            return shorthand as string;
+          }
+        }
+
+        // Default: Use first meaningful word + arrow if direction can be inferred
+        const firstVerb = words.find(word =>
+          ['creates', 'works', 'manages', 'depends', 'mentions', 'discusses', 'assigned', 'responsible'].includes(word)
+        );
+
+        if (firstVerb) {
+          const verbAbbrev: Record<string, string> = {
+            'creates': '→',
+            'works': '→',
+            'manages': '→',
+            'depends': '→',
+            'mentions': '→',
+            'discusses': '→',
+            'assigned': '→',
+            'responsible': '→',
+          };
+
+          const abbrev = verbAbbrev[firstVerb] || '→';
+          return firstVerb.substring(0, 3) + abbrev;
+        }
+
+        // Fallback: Use first 2 meaningful words, max 12 chars
+        const meaningfulWords = words.filter(word =>
+          word.length > 2 &&
+          !['the', 'and', 'for', 'with', 'this', 'that', 'have', 'been', 'from', 'they', 'said'].includes(word)
+        );
+
+        if (meaningfulWords.length >= 2) {
+          const result = meaningfulWords.slice(0, 2).join('').substring(0, 12);
+          return result.length > 8 ? result.substring(0, 8) + '..' : result;
+        }
       }
-      return text.substring(0, 12) + '...';
+
+      // Ultimate fallback: truncate to 12 chars with ellipsis
+      return text.substring(0, 12) + (text.length > 12 ? '...' : '');
     }
 
     return text;
@@ -684,17 +1264,19 @@ export const ContextView: React.FC = () => {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Graph Canvas */}
-        <div 
+        <div
           ref={containerRef}
           className="flex-1 relative overflow-hidden"
-          style={{ 
+          style={{
             background: `
-              radial-gradient(circle at 50% 50%, rgba(0, 245, 212, 0.02) 0%, transparent 50%),
-              linear-gradient(rgba(0, 245, 212, 0.02) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(0, 245, 212, 0.02) 1px, transparent 1px),
-              #0a0a0f
+              ${THEME.bg.neuralPattern},
+              radial-gradient(circle at 50% 50%, ${THEME.bg.grid.replace('0.04', '0.06')} 0%, transparent 50%),
+              linear-gradient(${THEME.bg.grid} 1px, transparent 1px),
+              linear-gradient(90deg, ${THEME.bg.grid} 1px, transparent 1px),
+              ${THEME.bg.primary}
             `,
-            backgroundSize: '100% 100%, 50px 50px, 50px 50px'
+            backgroundSize: '100% 100%, 100% 100%, 60px 60px, 60px 60px, 100% 100%',
+            backgroundBlend: 'normal, normal, normal, normal, normal'
           }}
         >
           {hasData ? (
@@ -703,7 +1285,7 @@ export const ContextView: React.FC = () => {
                 ref={graphRef}
                 width={dimensions.width - (selectedNodeData ? 320 : 0)}
                 height={dimensions.height}
-                graphData={graphData}
+                graphData={memoizedGraphData}
 
                 // Simulation
                 cooldownTicks={isSimulationRunning ? 200 : 0}
@@ -712,12 +1294,9 @@ export const ContextView: React.FC = () => {
 
                 // 2D Settings
                 backgroundColor="#0a0a0f"
-                showNavInfo={false}
 
                 // 2D Interaction
                 enableNodeDrag={true}
-                enableZoom={true}
-                enablePan={true}
 
                 // Node rendering
                 nodeCanvasObject={(node, ctx) => {
@@ -731,27 +1310,43 @@ export const ContextView: React.FC = () => {
                   const x = n.x || 0;
                   const y = n.y || 0;
 
-                  // Draw outer circle
+                  // Draw strong glow effect (always visible, stronger when highlighted)
+                  ctx.fillStyle = isHighlighted ? colors.glow : colors.glow.replace('cc', '88');
+                  ctx.beginPath();
+                  ctx.arc(x, y, radius + 3, 0, 2 * Math.PI);
+                  ctx.fill();
+
+                  // Draw outer circle glow
+                  ctx.strokeStyle = colors.glow;
+                  ctx.lineWidth = isHighlighted ? 3 : 1.5;
+                  ctx.beginPath();
+                  ctx.arc(x, y, radius + 1.5, 0, 2 * Math.PI);
+                  ctx.stroke();
+
+                  // Draw bright core node
                   ctx.fillStyle = colors.primary;
                   ctx.beginPath();
                   ctx.arc(x, y, radius, 0, 2 * Math.PI);
                   ctx.fill();
 
-                  // Draw glow effect
-                  if (isHighlighted) {
-                    ctx.strokeStyle = colors.glow;
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.arc(x, y, radius + 2, 0, 2 * Math.PI);
-                    ctx.stroke();
-                  }
+                  // Draw simple node label - very thin, light text
+                  const nodeDisplayName = getNodeDisplayName((n as any).name || n.id, n.group || 'entity');
+                  const displayName = nodeDisplayName.display || nodeDisplayName;
 
-                  // Draw label
-                  ctx.fillStyle = THEME.text.primary;
-                  ctx.font = 'bold 12px monospace';
+                  // Ultra-thin font weight with light gray color
+                  ctx.font = '200 8px -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif';
+                  
+                  // Light gray text - much lighter than the cyan lines
+                  ctx.fillStyle = '#6b7280'; // Light gray, not bright
+                  
                   ctx.textAlign = 'center';
-                  ctx.textBaseline = 'middle';
-                  ctx.fillText(n.id.substring(0, 1).toUpperCase(), x, y);
+                  ctx.textBaseline = 'top';
+                  ctx.globalAlpha = 0.7; // Subtle, not prominent
+                  
+                  // Simple text positioning
+                  const textY = y + radius + 4;
+                  ctx.fillText(displayName, x, textY);
+                  ctx.globalAlpha = 1;
                 }}
                 nodePointerAreaPaint={(node, color, ctx) => {
                   const n = node as Node;
@@ -792,10 +1387,12 @@ export const ContextView: React.FC = () => {
                         const x = source.x + (target.x - source.x) * particle.progress;
                         const y = source.y + (target.y - source.y) * particle.progress;
 
-                        ctx.fillStyle = '#00f5d4';
-                        ctx.globalAlpha = 0.7;
+                        // Alternate particle colors between neon green and pink
+                        const particleColors = ['#4ade80', '#f472b6', '#22d3ee', '#a78bfa'];
+                        ctx.fillStyle = particleColors[Math.floor(particle.progress * 4) % 4];
+                        ctx.globalAlpha = 0.8;
                         ctx.beginPath();
-                        ctx.arc(x, y, 2, 0, 2 * Math.PI);
+                        ctx.arc(x, y, 2.5, 0, 2 * Math.PI);
                         ctx.fill();
                       });
                     }
@@ -803,22 +1400,32 @@ export const ContextView: React.FC = () => {
 
                   ctx.globalAlpha = 1;
 
-                  // Draw relationship label if enabled
+                  // Draw relationship label if enabled - skinny font, no glow
                   if (relationshipTextMode !== 'off' && link.value && isHighlighted) {
                     const midX = (source.x + target.x) / 2;
                     const midY = (source.y + target.y) / 2;
 
                     const label = relationshipTextMode === 'full' ? link.value : abbreviateRelationship(link.value);
+                    const labelColor = getRelationshipColor(label);
 
-                    ctx.fillStyle = THEME.text.accent;
-                    ctx.font = relationshipTextMode === 'full' ? '9px monospace' : '10px monospace';
+                    // Skinny font without glow
+                    ctx.font = '300 8px -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif';
+                    ctx.fillStyle = labelColor;
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.shadowColor = 'rgba(0,0,0,0.8)';
-                    ctx.shadowBlur = 4;
-                    ctx.globalAlpha = 0.95;
-                    ctx.fillText(label, midX, midY - 5);
-                    ctx.shadowColor = 'transparent';
+                    ctx.globalAlpha = 0.8;
+                    ctx.letterSpacing = '0.3px';
+
+                    // Draw text with subtle outline for readability
+                    ctx.strokeStyle = 'rgba(10, 10, 15, 0.7)';
+                    ctx.lineWidth = 2;
+                    ctx.strokeText(label, midX, midY);
+
+                    // Draw text
+                    ctx.fillText(label, midX, midY);
+
+                    // Reset
+                    ctx.letterSpacing = 'normal';
                     ctx.globalAlpha = 1;
                   }
                 }}
@@ -826,7 +1433,6 @@ export const ContextView: React.FC = () => {
                 // Events
                 onNodeClick={handleNodeClick}
                 onNodeHover={handleNodeHover}
-                onNodeDragStart={handleNodeDragStart}
                 onNodeDrag={handleNodeDrag}
                 onNodeDragEnd={handleNodeDragEnd}
                 onBackgroundClick={handleBackgroundClick}

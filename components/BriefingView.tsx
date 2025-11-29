@@ -282,70 +282,88 @@ const TimelineSummaryCard: React.FC<{
   hasStructuredContent: boolean;
   cleanContent: (s: string) => string;
 }> = ({ summary, index, sections, hasStructuredContent, cleanContent }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(index === 0); // Today's entry starts expanded
   
   const hasMoreItems = sections.some(section => section.items.length > 5);
+  const totalItems = sections.reduce((acc, s) => acc + s.items.length, 0);
+  const hiddenItems = sections.reduce((acc, s) => acc + Math.max(0, s.items.length - 5), 0);
   
   return (
-    <div className="relative pl-8 pb-6 border-l-2 border-gray-800 last:pb-0">
+    <div className="relative pl-8 pb-8 border-l-2 border-cyan-900/30 last:pb-0 group">
       {/* Timeline dot with day indicator */}
-      <div className="absolute left-[-9px] top-0 w-4 h-4 bg-amber-500/20 border-2 border-amber-500 rounded-full flex items-center justify-center">
-        {index === 0 && <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>}
+      <div className="absolute left-[-9px] top-0 w-4 h-4 bg-cyan-500/20 border-2 border-cyan-500 rounded-full flex items-center justify-center group-hover:border-cyan-400 transition-colors">
+        {index === 0 && <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>}
       </div>
       
-      <div className="bg-gray-900/40 border border-gray-800 rounded-lg overflow-hidden hover:border-amber-500/30 transition-colors">
-        {/* Header */}
-        <div className="flex justify-between items-center p-4 bg-gray-900/60 border-b border-gray-800">
+      <div className="bg-gradient-to-br from-gray-900/60 to-gray-900/40 border border-gray-800 rounded-lg overflow-hidden hover:border-cyan-500/40 transition-all hover:shadow-lg hover:shadow-cyan-500/10">
+        {/* Header - Clickable to expand/collapse */}
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="w-full flex justify-between items-center p-4 bg-gradient-to-r from-gray-900/80 to-gray-900/60 border-b border-gray-800 hover:bg-gray-900/90 transition-colors text-left"
+        >
           <div className="flex items-center gap-3">
-            <span className={`text-sm font-mono px-3 py-1 rounded ${
+            <span className={`text-sm font-semibold px-3 py-1.5 rounded-md ${
               index === 0 
-                ? 'text-amber-300 bg-amber-900/30 border border-amber-700/30' 
+                ? 'text-cyan-300 bg-cyan-900/30 border border-cyan-700/50' 
                 : 'text-gray-400 bg-gray-800/50'
             }`}>
               {summary.readableTime}
             </span>
             {index === 0 && (
-              <span className="text-xs text-green-400 bg-green-900/20 px-2 py-0.5 rounded font-mono">
-                LATEST
+              <span className="text-xs text-green-400 bg-green-900/30 px-2 py-1 rounded-md font-semibold border border-green-700/30">
+                LIVE
+              </span>
+            )}
+            {hasStructuredContent && (
+              <span className="text-xs text-gray-500 font-mono">
+                {totalItems} item{totalItems !== 1 ? 's' : ''}
               </span>
             )}
           </div>
-          <span className="text-xs text-gray-600 font-mono">{summary.timeRange}</span>
-        </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500 font-mono">{summary.timeRange}</span>
+            <span className={`text-cyan-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+              ▼
+            </span>
+          </div>
+        </button>
         
-        {/* Content */}
-        <div className="p-4">
-          {hasStructuredContent ? (
-            <div className="space-y-4">
-              {sections.map((section, sIdx) => (
-                <div key={sIdx}>
-                  <h4 className="text-xs font-mono text-amber-400/80 mb-2 flex items-center gap-2">
-                    {getSectionIcon(section.title)}
-                    {section.title}
-                  </h4>
-                  <ul className="space-y-1.5">
-                    {(isExpanded ? section.items : section.items.slice(0, 5)).map((item, itemIdx) => (
-                      <li key={itemIdx} className="text-sm text-gray-300 flex items-start gap-2">
-                        <span className="text-amber-600 mt-1">•</span>
-                        <span className="leading-relaxed">{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-              {hasMoreItems && (
-                <button
-                  onClick={() => setIsExpanded(!isExpanded)}
-                  className="text-xs text-amber-400 hover:text-amber-300 font-mono flex items-center gap-1 transition-colors"
-                >
-                  {isExpanded ? '▲ Show Less' : `▼ Show More`}
-                </button>
-              )}
-            </div>
-          ) : (
-            <FallbackContentDisplay content={summary.content} cleanContent={cleanContent} />
-          )}
-        </div>
+        {/* Content - Collapsible */}
+        {isExpanded && (
+          <div className="p-4">
+            {hasStructuredContent ? (
+              <div className="space-y-5">
+                {sections.map((section, sIdx) => (
+                  <div key={sIdx} className="border-l-2 border-cyan-900/40 pl-4">
+                    <h4 className="text-sm font-bold text-cyan-400 mb-3 flex items-center gap-2">
+                      {getSectionIcon(section.title)}
+                      {section.title}
+                      <span className="text-xs text-gray-600 font-normal ml-auto">
+                        {section.items.length} item{section.items.length !== 1 ? 's' : ''}
+                      </span>
+                    </h4>
+                    <ul className="space-y-2">
+                      {section.items.map((item, itemIdx) => (
+                        <li key={itemIdx} className="text-sm text-gray-200 flex items-start gap-3 pl-1">
+                          <span className="text-cyan-400 mt-0.5 text-base">▸</span>
+                          <span className="leading-relaxed flex-1">{parseTextToElements(item)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <FallbackContentDisplay content={summary.content} cleanContent={cleanContent} />
+            )}
+          </div>
+        )}
+        
+        {!isExpanded && hasStructuredContent && hiddenItems > 0 && (
+          <div className="px-4 pb-3 text-xs text-gray-500 italic">
+            Click to view {hiddenItems} more item{hiddenItems !== 1 ? 's' : ''}...
+          </div>
+        )}
       </div>
     </div>
   );
@@ -395,82 +413,33 @@ const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) 
     return () => clearInterval(interval);
   }, [timeline]);
 
-  // Clean content before processing - removes JSON artifacts and metadata (keeps markdown for rendering)
+  // Clean content - MINIMAL cleaning to preserve Pieces' beautiful structure
   const cleanContent = (raw: string): string => {
     let cleaned = raw;
     
-    // Remove JSON objects and arrays from content
-    cleaned = cleaned.replace(/\{"[^"]*":[^}]*\}/g, '');
-    cleaned = cleaned.replace(/\[\{[^\]]*\}\]/g, '');
-    cleaned = cleaned.replace(/\{[^{}]*"instructions:"[^}]*\}/g, '');
-    cleaned = cleaned.replace(/\{[^{}]*"created":[^}]*\}/g, '');
-    cleaned = cleaned.replace(/\{[^{}]*"browser_url":[^}]*\}/g, '');
-    cleaned = cleaned.replace(/\{[^{}]*"hints":[^}]*\}/g, '');
-    cleaned = cleaned.replace(/\{[^{}]*"pro_tips":[^}]*\}/g, '');
+    // Only remove obvious JSON artifacts and metadata noise
+    cleaned = cleaned.replace(/\{"[^"]*":\s*"[^"]*"[^}]*\}/g, ''); // Simple JSON objects
+    cleaned = cleaned.replace(/\{[^{}]*"browser_url":[^}]*\}/g, ''); // URL metadata
     
-    // Remove incomplete fragments
-    cleaned = cleaned.replace(/\}\s*\]\s*,?\s*"?[a-z_]*"?:?\s*\[?\s*\{?/gi, '');
-    cleaned = cleaned.replace(/",?"?[a-z_]*"?:\s*"[^"]*$/gi, '');
-    
-    // Clean JSON punctuation artifacts (but keep some for structure)
-    cleaned = cleaned.replace(/[{}\[\]"]+(?![a-zA-Z])/g, '');
-    cleaned = cleaned.replace(/:\s*,/g, '');
-    cleaned = cleaned.replace(/,\s*,/g, '');
-    
-    // Remove isolated technical words
-    cleaned = cleaned.replace(/^\s*detected\s*$/gm, '');
-    cleaned = cleaned.replace(/^\s*activity\s*$/gm, '');
-    cleaned = cleaned.replace(/Automated Summary:\s*/gi, '');
-    
-    // ═══════════════════════════════════════════════════════════════════════════
-    // COMPLETELY REMOVE ALL "ACTIVITY EVENTS" SECTION AND EVENT DATA
-    // ═══════════════════════════════════════════════════════════════════════════
-    
-    // Remove meta headers like "📋 DETAILED WORKSTREAM SUMMARIES"
-    cleaned = cleaned.replace(/📋?\s*DETAILED WORKSTREAM SUMMARIES\s*\n?/gi, '');
-    
-    // Remove the entire ACTIVITY EVENTS section and everything after it
+    // Remove the ACTIVITY EVENTS section (we don't want raw events)
     cleaned = cleaned.replace(/🔄?\s*ACTIVITY EVENTS[\s\S]*$/gi, '');
     cleaned = cleaned.replace(/ACTIVITY EVENTS[\s\S]*$/gi, '');
     
-    // Remove individual event headers like "Event 1 - Alfie the AI Agent - Cursor"
+    // Remove individual event metadata lines
     cleaned = cleaned.replace(/^Event\s+\d+\s*[-–—].*$/gm, '');
-    
-    // Remove activity metadata
-    cleaned = cleaned.replace(/Activity \d+\s*\n/gi, '');
-    cleaned = cleaned.replace(/Event \d+\s*\n/gi, '');
     cleaned = cleaned.replace(/Created:\s*\d+\s*(hrs?|mins?|secs?|days?)[^\n]*\n/gi, '');
     cleaned = cleaned.replace(/Summarized time-range:\s*[^\n]*\n/gi, '');
     cleaned = cleaned.replace(/Last accessed:\s*[^\n]*\n/gi, '');
     cleaned = cleaned.replace(/Event source:\s*[^\n]*\n/gi, '');
     cleaned = cleaned.replace(/App title:\s*[^\n]*\n/gi, '');
     cleaned = cleaned.replace(/Window title:\s*[^\n]*\n/gi, '');
-    cleaned = cleaned.replace(/URL:\s*[^\n]*\n/gi, '');
-    cleaned = cleaned.replace(/Extracted text:\s*\[?[^\]]*\]?\s*\n/gi, '');
     
-    // Remove noise/garbage lines from events
-    cleaned = cleaned.replace(/^"?PILING INTELLIGENCE.*$/gm, '');
-    cleaned = cleaned.replace(/^"?COMPILING INTELLIGENCE.*$/gm, '');
-    cleaned = cleaned.replace(/^Elements Console Sources.*$/gm, '');
-    cleaned = cleaned.replace(/^A Y should not be used in production.*$/gm, '');
-    cleaned = cleaned.replace(/^git push origin.*$/gm, '');
-    cleaned = cleaned.replace(/^Alfie the AI Agent$/gm, '');
-    
-    // Remove [Document Content], [Code Editor Content], etc.
-    cleaned = cleaned.replace(/\[(Document|Code Editor|Web Browser) Content\]/gi, '');
-    
-    // Remove timestamp lines like "(2025-11-28 13:47:37 Friday November 28 2025)"
+    // Remove timestamp patterns
     cleaned = cleaned.replace(/\(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[^)]*\)/g, '');
-    
-    // Remove standalone date/time patterns
     cleaned = cleaned.replace(/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+until\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s*$/gm, '');
     
-    // Fix markdown bullet issues: remove redundant bullets like "• *" or "• -"
-    cleaned = cleaned.replace(/^[•\-*]\s+[•\-*]\s+/gm, '• ');
-    cleaned = cleaned.replace(/^[•\-*]\s+\*\*/gm, '• **');
-    
-    // Clean up multiple blank lines
-    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+    // Clean up excessive blank lines
+    cleaned = cleaned.replace(/\n{4,}/g, '\n\n');
     
     return cleaned.trim();
   };
@@ -480,12 +449,12 @@ const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) 
     const content = cleanContent(rawContent);
     const sections: { title: string; items: string[] }[] = [];
     
-    // Section patterns matching the Pieces desktop app format
+    // Section patterns matching Pieces LTM's structured format
     const sectionPatterns = [
-      { pattern: /(?:📋?\s*)?(?:\*\*)?Core Tasks & Projects(?:\*\*)?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|Key Discussions|Documents & Code|Next Steps|\*\*Core|\*\*Key|\*\*Documents|\*\*Next|###|$))/i, title: 'Core Tasks & Projects' },
-      { pattern: /(?:💡?\s*)?(?:\*\*)?Key Discussions & Decisions(?:\*\*)?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|Core Tasks|Documents & Code|Next Steps|\*\*Core|\*\*Key|\*\*Documents|\*\*Next|###|$))/i, title: 'Key Discussions & Decisions' },
-      { pattern: /(?:📄?\s*)?(?:\*\*)?Documents & Code (?:Reviewed|Focused On)(?:\*\*)?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|Core Tasks|Key Discussions|Next Steps|\*\*Core|\*\*Key|\*\*Documents|\*\*Next|###|$))/i, title: 'Documents & Code Reviewed' },
-      { pattern: /(?:⏭️?\s*)?(?:\*\*)?Next Steps(?:\*\*)?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|Core Tasks|Key Discussions|Documents & Code|\*\*Core|\*\*Key|\*\*Documents|\*\*Next|###|$))/i, title: 'Next Steps' },
+      { pattern: /(?:📋?\s*)?(?:\*\*)?Core Tasks?(?:\s*&\s*Projects)?(?:\*\*)?\s*[-:–—]?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|\*\*(?:Core|Key|Documents?|Next)|###|$))/i, title: 'Core Tasks & Projects' },
+      { pattern: /(?:💡?\s*)?(?:\*\*)?Key Discussions?(?:\s*&\s*Decisions)?(?:\*\*)?\s*[-:–—]?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|\*\*(?:Core|Key|Documents?|Next)|###|$))/i, title: 'Key Discussions & Decisions' },
+      { pattern: /(?:📄?\s*)?(?:\*\*)?Documents?(?:\s*&\s*Code)?(?:\s*(?:Reviewed|Focused On))?(?:\*\*)?\s*[-:–—]?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|\*\*(?:Core|Key|Documents?|Next)|###|$))/i, title: 'Documents & Code Reviewed' },
+      { pattern: /(?:⏭️?\s*)?(?:\*\*)?Next Steps?(?:\*\*)?\s*[-:–—]?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|\*\*(?:Core|Key|Documents?|Next)|###|$))/i, title: 'Next Steps' },
     ];
     
     for (const { pattern, title } of sectionPatterns) {
@@ -670,10 +639,14 @@ const renderFormattedLine = (line: string, idx: number): React.ReactElement | nu
   // Remove markdown header markers but keep the text
   const cleanedLine = line.replace(/^#{1,3}\s+/, '').replace(/^\*\*\s*/, '').replace(/\s*\*\*$/, '');
   
-  // Headers (lines that were ## or ### or are section titles)
-  if (line.match(/^#{2,3}\s+/) || line.match(/^(Core Tasks|Key Discussions|Documents & Code|Next Steps)/i)) {
+  // Headers - Detect markdown headers OR Pieces' bold section titles
+  if (
+    line.match(/^#{2,3}\s+/) || // Markdown headers like ## or ###
+    line.match(/^\*\*[A-Z].*\*\*$/) || // Bold titles like **Core Tasks & Projects**
+    line.match(/^(Core Tasks|Key Discussions|Documents & Code|Next Steps)/i)
+  ) {
     return (
-      <h3 key={idx} className="text-base font-bold text-amber-400 mt-4 mb-2">
+      <h3 key={idx} className="text-lg font-bold text-cyan-400 mt-6 mb-3 border-b border-gray-800 pb-2">
         {parseTextToElements(cleanedLine)}
       </h3>
     );
@@ -683,9 +656,9 @@ const renderFormattedLine = (line: string, idx: number): React.ReactElement | nu
   if (line.match(/^[•\-*]\s+/)) {
     const bulletContent = line.replace(/^[•\-*]\s+/, '');
     return (
-      <li key={idx} className="text-sm text-gray-300 flex items-start gap-2 mb-1">
-        <span className="text-amber-600 mt-0.5">•</span>
-        <span className="leading-relaxed">{parseTextToElements(bulletContent)}</span>
+      <li key={idx} className="text-sm text-gray-200 flex items-start gap-3 mb-2 pl-1">
+        <span className="text-cyan-400 mt-0.5 text-base">▸</span>
+        <span className="leading-relaxed flex-1">{parseTextToElements(bulletContent)}</span>
       </li>
     );
   }
