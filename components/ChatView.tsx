@@ -5,6 +5,7 @@ import { GoogleGenAI, Chat, Content } from '@google/genai';
 import { getGraph, updateGraphFromConversation } from '../utils/knowledgeGraph';
 import { getApiProvider, getGeminiApiKey, getOpenRouterApiKey } from '../utils/apiKey';
 import { getBriefing, formatBriefingForAlfie, BusinessBriefing } from '../utils/briefing';
+import { getContextForAlfie } from '../utils/workstreamSummaries';
 
 type AlfieMood = 'jovial' | 'volatile' | 'philosophical' | 'calculating' | 'world-weary';
 type Message = {
@@ -39,7 +40,10 @@ You are the Business Manager for **Donjon Intelligence Systems**. This is not a 
 *   **Strategic Advisor**: You don't just write code; you question *why* we are writing it. Is it good for business? Is it smart?
 *   **Risk Identifier**: You spot the weakness in the plan before it kills us.
 *   **Opportunity Scout**: You see the angles. "If we connect this Pieces data to that graph, we own the market, right?"
-*   **Context Awareness**: You have access to a "Business Briefing" (Pieces LTM data) and a "Knowledge Graph". USE THEM. If the briefing says we are working on X, ask about X.
+*   **Context Awareness**: You have access to detailed workstream summaries, a "Business Briefing" (Pieces LTM data) and a "Knowledge Graph". USE THEM. If the workstream shows we are working on X, ask about X. Be specific.
+
+**Your Workstream Context (Last 7 Days - Clean Summaries):**
+__WORKSTREAM_CONTEXT__
 
 **Current Business Context (Donjon Intelligence Systems):**
 __BUSINESS_BRIEFING__
@@ -88,6 +92,14 @@ export const ChatView: React.FC = () => {
         const graphData = getGraph();
         const graphContext = JSON.stringify(graphData.nodes.length > 0 ? graphData : {});
 
+        // Load workstream context summaries
+        let workstreamContext = 'No workstream summaries available.';
+        try {
+            workstreamContext = await getContextForAlfie(7);
+        } catch (error) {
+            console.error('Failed to load workstream context:', error);
+        }
+
         // Load business briefing
         let briefingContext = 'No business briefing available. Ensure Pieces OS is running.';
         try {
@@ -98,6 +110,7 @@ export const ChatView: React.FC = () => {
         }
 
         const systemInstruction = systemInstructionTemplate
+            .replace('__WORKSTREAM_CONTEXT__', workstreamContext)
             .replace('__GRAPH_CONTEXT__', graphContext)
             .replace('__BUSINESS_BRIEFING__', briefingContext)
             .replace('__CAPABILITIES__', GEMINI_CAPABILITIES);
@@ -130,6 +143,14 @@ export const ChatView: React.FC = () => {
         const graphData = getGraph();
         const graphContext = JSON.stringify(graphData.nodes.length > 0 ? graphData : {});
 
+        // Load workstream context summaries
+        let workstreamContext = 'No workstream summaries available.';
+        try {
+            workstreamContext = await getContextForAlfie(7);
+        } catch (error) {
+            console.error('Failed to load workstream context:', error);
+        }
+
         // Load business briefing
         let briefingContext = 'No business briefing available. Ensure Pieces OS is running.';
         try {
@@ -140,6 +161,7 @@ export const ChatView: React.FC = () => {
         }
 
         const systemInstruction = systemInstructionTemplate
+            .replace('__WORKSTREAM_CONTEXT__', workstreamContext)
             .replace('__GRAPH_CONTEXT__', graphContext)
             .replace('__BUSINESS_BRIEFING__', briefingContext)
             .replace('__CAPABILITIES__', ''); // No search for OpenRouter

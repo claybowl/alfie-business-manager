@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import {
   generateIntelligenceDossier,
-  saveUserNotes,
   uploadDossierToSupabase,
   IntelligenceDossier,
   WorkstreamSummary,
   WorkstreamEvent,
   ActiveProject,
   LinearIssueData,
+  LinearProjectData,
   NotionPage
 } from '../utils/briefing';
 import { RefreshIcon } from './Icons';
-import { getRecentSessions, ConversationSession, generateConversationSummary } from '../utils/conversations';
+import { getRecentSessions, deleteSession, ConversationSession, generateConversationSummary } from '../utils/conversations';
+import { NotesPanel } from './NotesPanel';
 
 type TabId = 'overview' | 'linear' | 'notion' | 'timeline' | 'events' | 'notes';
 
@@ -19,8 +20,6 @@ export const BriefingView: React.FC = () => {
   const [dossier, setDossier] = useState<IntelligenceDossier | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
-  const [userNotes, setUserNotes] = useState('');
-  const [notesSaved, setNotesSaved] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [lastCloudSync, setLastCloudSync] = useState<string | null>(localStorage.getItem('alfie-last-cloud-sync'));
@@ -30,7 +29,6 @@ export const BriefingView: React.FC = () => {
     try {
       const data = await generateIntelligenceDossier(forceRefresh);
       setDossier(data);
-      setUserNotes(data.userNotes || '');
     } catch (error) {
       console.error('Failed to load dossier:', error);
     } finally {
@@ -41,12 +39,6 @@ export const BriefingView: React.FC = () => {
   useEffect(() => {
     loadDossier();
   }, []);
-
-  const handleSaveNotes = async () => {
-    await saveUserNotes(userNotes);
-    setNotesSaved(true);
-    setTimeout(() => setNotesSaved(false), 2000);
-  };
 
   const handleCloudSync = async () => {
     if (!dossier) {
@@ -92,11 +84,11 @@ export const BriefingView: React.FC = () => {
   
   const tabs = [
     { id: 'overview' as TabId, label: 'Overview', count: dossier?.activeProjects.length || 0 },
-    { id: 'linear' as TabId, label: 'Linear', count: dossier?.linearIssues?.length || 0, icon: '📋' },
+    { id: 'linear' as TabId, label: 'Linear', count: dossier?.linearProjects?.length || 0, icon: '📋' },
     { id: 'notion' as TabId, label: 'Notion', count: dossier?.notionPages?.length || 0, icon: '📝' },
     { id: 'timeline' as TabId, label: 'Timeline', count: dossier?.timeline.length || 0 },
     { id: 'events' as TabId, label: 'Activity', count: conversationCount, icon: '💬' },
-    { id: 'notes' as TabId, label: 'Notes', count: userNotes.length > 0 ? 1 : 0 },
+    { id: 'notes' as TabId, label: 'Notes', count: 0 },
   ];
 
   return (
@@ -170,18 +162,11 @@ export const BriefingView: React.FC = () => {
       <main className="flex-grow overflow-y-auto">
         <div className="container mx-auto px-4 py-6 max-w-7xl">
           {activeTab === 'overview' && dossier && <OverviewTab dossier={dossier} />}
-          {activeTab === 'linear' && dossier && <LinearTab issues={dossier.linearIssues || []} connected={dossier.dataSources?.linear} />}
+          {activeTab === 'linear' && dossier && <LinearTab projects={dossier.linearProjects || []} issues={dossier.linearIssues || []} connected={dossier.dataSources?.linear} />}
           {activeTab === 'notion' && dossier && <NotionTab pages={dossier.notionPages || []} connected={dossier.dataSources?.notion} />}
           {activeTab === 'timeline' && dossier && <TimelineTab timeline={dossier.timeline} />}
           {activeTab === 'events' && <ConversationsTab />}
-          {activeTab === 'notes' && (
-            <NotesTab 
-              notes={userNotes} 
-              setNotes={setUserNotes} 
-              onSave={handleSaveNotes}
-              saved={notesSaved}
-            />
-          )}
+          {activeTab === 'notes' && <NotesPanel />}
         </div>
       </main>
     </div>
@@ -251,7 +236,6 @@ const OverviewTab: React.FC<{ dossier: IntelligenceDossier }> = ({ dossier }) =>
         <StatCard label="Linear Issues" value={dossier.linearIssues?.length || 0} color="indigo" />
         <StatCard label="Notion Pages" value={dossier.notionPages?.length || 0} color="gray" />
         <StatCard label="Timeline" value={dossier.timeline.length} color="blue" />
-        <StatCard label="Activity" value={dossier.events.length} color="purple" />
       </section>
       
       {/* Data Sources & Context Status */}
@@ -286,18 +270,83 @@ const OverviewTab: React.FC<{ dossier: IntelligenceDossier }> = ({ dossier }) =>
         )}
       </section>
 
-      {/* User Notes Preview */}
-      {dossier.userNotes && (
-        <section>
-          <h2 className="text-lg font-bold text-gray-200 mb-4 flex items-center gap-2">
-            <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-            Your Notes to Alfie
-          </h2>
-          <div className="bg-blue-900/10 border border-blue-800/30 rounded-lg p-4">
-            <p className="text-blue-200/80 text-sm whitespace-pre-wrap">{dossier.userNotes}</p>
+    </div>
+  );
+};
+
+// Timeline Summary Card with expand/collapse
+const TimelineSummaryCard: React.FC<{
+  summary: WorkstreamSummary;
+  index: number;
+  sections: { title: string; items: string[] }[];
+  hasStructuredContent: boolean;
+  cleanContent: (s: string) => string;
+}> = ({ summary, index, sections, hasStructuredContent, cleanContent }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  const hasMoreItems = sections.some(section => section.items.length > 5);
+  
+  return (
+    <div className="relative pl-8 pb-6 border-l-2 border-gray-800 last:pb-0">
+      {/* Timeline dot with day indicator */}
+      <div className="absolute left-[-9px] top-0 w-4 h-4 bg-amber-500/20 border-2 border-amber-500 rounded-full flex items-center justify-center">
+        {index === 0 && <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>}
+      </div>
+      
+      <div className="bg-gray-900/40 border border-gray-800 rounded-lg overflow-hidden hover:border-amber-500/30 transition-colors">
+        {/* Header */}
+        <div className="flex justify-between items-center p-4 bg-gray-900/60 border-b border-gray-800">
+          <div className="flex items-center gap-3">
+            <span className={`text-sm font-mono px-3 py-1 rounded ${
+              index === 0 
+                ? 'text-amber-300 bg-amber-900/30 border border-amber-700/30' 
+                : 'text-gray-400 bg-gray-800/50'
+            }`}>
+              {summary.readableTime}
+            </span>
+            {index === 0 && (
+              <span className="text-xs text-green-400 bg-green-900/20 px-2 py-0.5 rounded font-mono">
+                LATEST
+              </span>
+            )}
           </div>
-        </section>
-      )}
+          <span className="text-xs text-gray-600 font-mono">{summary.timeRange}</span>
+        </div>
+        
+        {/* Content */}
+        <div className="p-4">
+          {hasStructuredContent ? (
+            <div className="space-y-4">
+              {sections.map((section, sIdx) => (
+                <div key={sIdx}>
+                  <h4 className="text-xs font-mono text-amber-400/80 mb-2 flex items-center gap-2">
+                    {getSectionIcon(section.title)}
+                    {section.title}
+                  </h4>
+                  <ul className="space-y-1.5">
+                    {(isExpanded ? section.items : section.items.slice(0, 5)).map((item, itemIdx) => (
+                      <li key={itemIdx} className="text-sm text-gray-300 flex items-start gap-2">
+                        <span className="text-amber-600 mt-1">•</span>
+                        <span className="leading-relaxed">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {hasMoreItems && (
+                <button
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  className="text-xs text-amber-400 hover:text-amber-300 font-mono flex items-center gap-1 transition-colors"
+                >
+                  {isExpanded ? '▲ Show Less' : `▼ Show More`}
+                </button>
+              )}
+            </div>
+          ) : (
+            <FallbackContentDisplay content={summary.content} cleanContent={cleanContent} />
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -346,7 +395,7 @@ const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) 
     return () => clearInterval(interval);
   }, [timeline]);
 
-  // Clean content before processing - removes JSON artifacts and metadata
+  // Clean content before processing - removes JSON artifacts and metadata (keeps markdown for rendering)
   const cleanContent = (raw: string): string => {
     let cleaned = raw;
     
@@ -363,8 +412,8 @@ const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) 
     cleaned = cleaned.replace(/\}\s*\]\s*,?\s*"?[a-z_]*"?:?\s*\[?\s*\{?/gi, '');
     cleaned = cleaned.replace(/",?"?[a-z_]*"?:\s*"[^"]*$/gi, '');
     
-    // Clean JSON punctuation artifacts
-    cleaned = cleaned.replace(/[{}\[\]"]+/g, '');
+    // Clean JSON punctuation artifacts (but keep some for structure)
+    cleaned = cleaned.replace(/[{}\[\]"]+(?![a-zA-Z])/g, '');
     cleaned = cleaned.replace(/:\s*,/g, '');
     cleaned = cleaned.replace(/,\s*,/g, '');
     
@@ -373,7 +422,57 @@ const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) 
     cleaned = cleaned.replace(/^\s*activity\s*$/gm, '');
     cleaned = cleaned.replace(/Automated Summary:\s*/gi, '');
     
-    return cleaned;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // COMPLETELY REMOVE ALL "ACTIVITY EVENTS" SECTION AND EVENT DATA
+    // ═══════════════════════════════════════════════════════════════════════════
+    
+    // Remove meta headers like "📋 DETAILED WORKSTREAM SUMMARIES"
+    cleaned = cleaned.replace(/📋?\s*DETAILED WORKSTREAM SUMMARIES\s*\n?/gi, '');
+    
+    // Remove the entire ACTIVITY EVENTS section and everything after it
+    cleaned = cleaned.replace(/🔄?\s*ACTIVITY EVENTS[\s\S]*$/gi, '');
+    cleaned = cleaned.replace(/ACTIVITY EVENTS[\s\S]*$/gi, '');
+    
+    // Remove individual event headers like "Event 1 - Alfie the AI Agent - Cursor"
+    cleaned = cleaned.replace(/^Event\s+\d+\s*[-–—].*$/gm, '');
+    
+    // Remove activity metadata
+    cleaned = cleaned.replace(/Activity \d+\s*\n/gi, '');
+    cleaned = cleaned.replace(/Event \d+\s*\n/gi, '');
+    cleaned = cleaned.replace(/Created:\s*\d+\s*(hrs?|mins?|secs?|days?)[^\n]*\n/gi, '');
+    cleaned = cleaned.replace(/Summarized time-range:\s*[^\n]*\n/gi, '');
+    cleaned = cleaned.replace(/Last accessed:\s*[^\n]*\n/gi, '');
+    cleaned = cleaned.replace(/Event source:\s*[^\n]*\n/gi, '');
+    cleaned = cleaned.replace(/App title:\s*[^\n]*\n/gi, '');
+    cleaned = cleaned.replace(/Window title:\s*[^\n]*\n/gi, '');
+    cleaned = cleaned.replace(/URL:\s*[^\n]*\n/gi, '');
+    cleaned = cleaned.replace(/Extracted text:\s*\[?[^\]]*\]?\s*\n/gi, '');
+    
+    // Remove noise/garbage lines from events
+    cleaned = cleaned.replace(/^"?PILING INTELLIGENCE.*$/gm, '');
+    cleaned = cleaned.replace(/^"?COMPILING INTELLIGENCE.*$/gm, '');
+    cleaned = cleaned.replace(/^Elements Console Sources.*$/gm, '');
+    cleaned = cleaned.replace(/^A Y should not be used in production.*$/gm, '');
+    cleaned = cleaned.replace(/^git push origin.*$/gm, '');
+    cleaned = cleaned.replace(/^Alfie the AI Agent$/gm, '');
+    
+    // Remove [Document Content], [Code Editor Content], etc.
+    cleaned = cleaned.replace(/\[(Document|Code Editor|Web Browser) Content\]/gi, '');
+    
+    // Remove timestamp lines like "(2025-11-28 13:47:37 Friday November 28 2025)"
+    cleaned = cleaned.replace(/\(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}[^)]*\)/g, '');
+    
+    // Remove standalone date/time patterns
+    cleaned = cleaned.replace(/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+until\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s*$/gm, '');
+    
+    // Fix markdown bullet issues: remove redundant bullets like "• *" or "• -"
+    cleaned = cleaned.replace(/^[•\-*]\s+[•\-*]\s+/gm, '• ');
+    cleaned = cleaned.replace(/^[•\-*]\s+\*\*/gm, '• **');
+    
+    // Clean up multiple blank lines
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+    
+    return cleaned.trim();
   };
   
   // Parse and organize content into sections
@@ -381,12 +480,12 @@ const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) 
     const content = cleanContent(rawContent);
     const sections: { title: string; items: string[] }[] = [];
     
-    // Common section patterns - more flexible matching
+    // Section patterns matching the Pieces desktop app format
     const sectionPatterns = [
-      { pattern: /📋?\s*Core Tasks & Projects\s*\n([\s\S]*?)(?=(?:📋|💬|📁|⚙️|\*\*|###|$))/i, title: 'Core Tasks & Projects' },
-      { pattern: /💬?\s*Key Discussions & Decisions\s*\n([\s\S]*?)(?=(?:📋|💬|📁|⚙️|\*\*|###|$))/i, title: 'Key Discussions & Decisions' },
-      { pattern: /📁?\s*Documents & Code Focused On\s*\n([\s\S]*?)(?=(?:📋|💬|📁|⚙️|\*\*|###|$))/i, title: 'Documents & Code' },
-      { pattern: /⚙️?\s*Technical Implementation\s*\n([\s\S]*?)(?=(?:📋|💬|📁|⚙️|\*\*|###|$))/i, title: 'Technical Implementation' },
+      { pattern: /(?:📋?\s*)?(?:\*\*)?Core Tasks & Projects(?:\*\*)?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|Key Discussions|Documents & Code|Next Steps|\*\*Core|\*\*Key|\*\*Documents|\*\*Next|###|$))/i, title: 'Core Tasks & Projects' },
+      { pattern: /(?:💡?\s*)?(?:\*\*)?Key Discussions & Decisions(?:\*\*)?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|Core Tasks|Documents & Code|Next Steps|\*\*Core|\*\*Key|\*\*Documents|\*\*Next|###|$))/i, title: 'Key Discussions & Decisions' },
+      { pattern: /(?:📄?\s*)?(?:\*\*)?Documents & Code (?:Reviewed|Focused On)(?:\*\*)?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|Core Tasks|Key Discussions|Next Steps|\*\*Core|\*\*Key|\*\*Documents|\*\*Next|###|$))/i, title: 'Documents & Code Reviewed' },
+      { pattern: /(?:⏭️?\s*)?(?:\*\*)?Next Steps(?:\*\*)?\s*\n([\s\S]*?)(?=(?:📋|💡|📄|⏭️|Core Tasks|Key Discussions|Documents & Code|\*\*Core|\*\*Key|\*\*Documents|\*\*Next|###|$))/i, title: 'Next Steps' },
     ];
     
     for (const { pattern, title } of sectionPatterns) {
@@ -414,7 +513,7 @@ const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) 
       <div className="flex items-center gap-3 p-3 bg-amber-900/10 border border-amber-800/30 rounded-lg">
         <div className={`w-2 h-2 ${isRefreshingToday ? 'bg-green-500 animate-spin' : 'bg-amber-500 animate-pulse'} rounded-full`}></div>
         <span className="text-xs text-amber-300/80 font-mono">
-          ROLLING 5-DAY CONTEXT WINDOW • {refreshedTimeline.length} day{refreshedTimeline.length !== 1 ? 's' : ''} of activity captured
+          14-DAY ROLLING CONTEXT • {refreshedTimeline.length} day{refreshedTimeline.length !== 1 ? 's' : ''} of workstream summaries
           {isRefreshingToday && ' • Refreshing today...'}
         </span>
       </div>
@@ -425,64 +524,14 @@ const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) 
           const hasStructuredContent = sections.length > 0;
           
           return (
-            <div key={summary.id} className="relative pl-8 pb-6 border-l-2 border-gray-800 last:pb-0">
-              {/* Timeline dot with day indicator */}
-              <div className="absolute left-[-9px] top-0 w-4 h-4 bg-amber-500/20 border-2 border-amber-500 rounded-full flex items-center justify-center">
-                {i === 0 && <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse"></div>}
-              </div>
-              
-              <div className="bg-gray-900/40 border border-gray-800 rounded-lg overflow-hidden hover:border-amber-500/30 transition-colors">
-                {/* Header */}
-                <div className="flex justify-between items-center p-4 bg-gray-900/60 border-b border-gray-800">
-                  <div className="flex items-center gap-3">
-                    <span className={`text-sm font-mono px-3 py-1 rounded ${
-                      i === 0 
-                        ? 'text-amber-300 bg-amber-900/30 border border-amber-700/30' 
-                        : 'text-gray-400 bg-gray-800/50'
-                    }`}>
-                      {summary.readableTime}
-                    </span>
-                    {i === 0 && (
-                      <span className="text-xs text-green-400 bg-green-900/20 px-2 py-0.5 rounded font-mono">
-                        LATEST
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-gray-600 font-mono">{summary.timeRange}</span>
-                </div>
-                
-                {/* Content */}
-                <div className="p-4">
-                  {hasStructuredContent ? (
-                    <div className="space-y-4">
-                      {sections.map((section, sIdx) => (
-                        <div key={sIdx}>
-                          <h4 className="text-xs font-mono text-amber-400/80 mb-2 flex items-center gap-2">
-                            {getSectionIcon(section.title)}
-                            {section.title}
-                          </h4>
-                          <ul className="space-y-1.5">
-                            {section.items.slice(0, 5).map((item, itemIdx) => (
-                              <li key={itemIdx} className="text-sm text-gray-300 flex items-start gap-2">
-                                <span className="text-amber-600 mt-1">•</span>
-                                <span className="leading-relaxed">{item}</span>
-                              </li>
-                            ))}
-                            {section.items.length > 5 && (
-                              <li className="text-xs text-gray-500 italic pl-4">
-                                + {section.items.length - 5} more items...
-                              </li>
-                            )}
-                          </ul>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <FallbackContentDisplay content={summary.content} cleanContent={cleanContent} />
-                  )}
-                </div>
-              </div>
-            </div>
+            <TimelineSummaryCard 
+              key={summary.id}
+              summary={summary}
+              index={i}
+              sections={sections}
+              hasStructuredContent={hasStructuredContent}
+              cleanContent={cleanContent}
+            />
           );
         })
       ) : (
@@ -493,11 +542,159 @@ const TimelineTab: React.FC<{ timeline: WorkstreamSummary[] }> = ({ timeline }) 
           <p className="text-lg text-gray-400 mb-2">No timeline data available</p>
           <p className="text-sm text-gray-600 max-w-md mx-auto">
             Workstream summaries will appear here as Pieces captures your coding activity. 
-            The rolling 5-day window ensures Alfie always has recent context.
+            The rolling 14-day window ensures Alfie always has recent context.
           </p>
         </div>
       )}
     </div>
+  );
+};
+
+// Parse text and convert links/formatting to HTML elements (NO MARKDOWN OUTPUT)
+const parseTextToElements = (text: string): React.ReactNode[] => {
+  const elements: React.ReactNode[] = [];
+  
+  // Regex patterns for parsing
+  const patterns = [
+    // Markdown links: [text](url)
+    { regex: /\[([^\]]+)\]\(([^)]+)\)/g, type: 'mdlink' },
+    // Bare URLs: http:// or https://
+    { regex: /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g, type: 'url' },
+    // Bold: **text**
+    { regex: /\*\*([^*]+)\*\*/g, type: 'bold' },
+    // Inline code: `text`
+    { regex: /`([^`]+)`/g, type: 'code' },
+  ];
+  
+  // First pass: extract markdown links
+  let remaining = text;
+  const mdLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  let match;
+  let lastIndex = 0;
+  const parts: { text: string; isLink?: boolean; url?: string; linkText?: string }[] = [];
+  
+  while ((match = mdLinkRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push({ text: text.slice(lastIndex, match.index) });
+    }
+    parts.push({ text: match[1], isLink: true, url: match[2], linkText: match[1] });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    parts.push({ text: text.slice(lastIndex) });
+  }
+  
+  // Second pass: process each part
+  parts.forEach((part, partIdx) => {
+    if (part.isLink) {
+      elements.push(
+        <a 
+          key={`link-${partIdx}`}
+          href={part.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-cyan-400 hover:text-cyan-300 underline"
+        >
+          {part.linkText}
+        </a>
+      );
+    } else {
+      // Process remaining text for bare URLs, bold, code
+      let subText = part.text;
+      
+      // Handle bare URLs
+      const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g;
+      const urlParts = subText.split(urlRegex);
+      
+      urlParts.forEach((urlPart, urlIdx) => {
+        if (urlPart.match(/^https?:\/\//)) {
+          elements.push(
+            <a 
+              key={`url-${partIdx}-${urlIdx}`}
+              href={urlPart}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-cyan-400 hover:text-cyan-300 underline"
+            >
+              {urlPart.length > 50 ? urlPart.slice(0, 50) + '...' : urlPart}
+            </a>
+          );
+        } else if (urlPart) {
+          // Handle bold and code in non-URL text
+          const boldParts = urlPart.split(/(\*\*[^*]+\*\*)/g);
+          boldParts.forEach((boldPart, boldIdx) => {
+            if (boldPart.match(/^\*\*.*\*\*$/)) {
+              elements.push(
+                <strong key={`bold-${partIdx}-${urlIdx}-${boldIdx}`} className="text-amber-300 font-semibold">
+                  {boldPart.replace(/\*\*/g, '')}
+                </strong>
+              );
+            } else if (boldPart.includes('`')) {
+              // Handle inline code
+              const codeParts = boldPart.split(/(`[^`]+`)/g);
+              codeParts.forEach((codePart, codeIdx) => {
+                if (codePart.match(/^`.*`$/)) {
+                  elements.push(
+                    <code key={`code-${partIdx}-${urlIdx}-${boldIdx}-${codeIdx}`} className="px-1.5 py-0.5 bg-gray-800/50 rounded text-cyan-400 text-xs font-mono">
+                      {codePart.replace(/`/g, '')}
+                    </code>
+                  );
+                } else if (codePart) {
+                  elements.push(codePart);
+                }
+              });
+            } else if (boldPart) {
+              elements.push(boldPart);
+            }
+          });
+        }
+      });
+    }
+  });
+  
+  return elements;
+};
+
+// Render content line with proper HTML formatting (NO MARKDOWN)
+const renderFormattedLine = (line: string, idx: number): React.ReactElement | null => {
+  // Skip metadata lines entirely
+  if (line.match(/^(Created|Summarized|Activity \d+|Event \d+|Last accessed|Event source|App title|Window title|URL|Extracted text):/i)) {
+    return null;
+  }
+  
+  // Skip timestamp patterns
+  if (line.match(/^\d{4}-\d{2}-\d{2}/)) {
+    return null;
+  }
+  
+  // Remove markdown header markers but keep the text
+  const cleanedLine = line.replace(/^#{1,3}\s+/, '').replace(/^\*\*\s*/, '').replace(/\s*\*\*$/, '');
+  
+  // Headers (lines that were ## or ### or are section titles)
+  if (line.match(/^#{2,3}\s+/) || line.match(/^(Core Tasks|Key Discussions|Documents & Code|Next Steps)/i)) {
+    return (
+      <h3 key={idx} className="text-base font-bold text-amber-400 mt-4 mb-2">
+        {parseTextToElements(cleanedLine)}
+      </h3>
+    );
+  }
+  
+  // Bullet points (•, -, *)
+  if (line.match(/^[•\-*]\s+/)) {
+    const bulletContent = line.replace(/^[•\-*]\s+/, '');
+    return (
+      <li key={idx} className="text-sm text-gray-300 flex items-start gap-2 mb-1">
+        <span className="text-amber-600 mt-0.5">•</span>
+        <span className="leading-relaxed">{parseTextToElements(bulletContent)}</span>
+      </li>
+    );
+  }
+  
+  // Regular paragraph
+  return (
+    <p key={idx} className="text-sm text-gray-300 leading-relaxed">
+      {parseTextToElements(cleanedLine)}
+    </p>
   );
 };
 
@@ -508,107 +705,67 @@ const FallbackContentDisplay: React.FC<{
 }> = ({ content, cleanContent }) => {
   const cleaned = cleanContent(content);
   
-  // Try to extract structured sections from cleaned content
-  const extractedSections: { title: string; items: string[] }[] = [];
-  
-  // Look for emoji-prefixed sections
-  const sectionMatches = cleaned.matchAll(/([📋💬📁⚙️🔧📌]\s*[A-Za-z\s&]+)\n([\s\S]*?)(?=(?:[📋💬📁⚙️🔧📌]|$))/g);
-  for (const match of sectionMatches) {
-    const title = match[1].trim();
-    const items = match[2]
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line.startsWith('•') || line.startsWith('-') || line.startsWith('*'))
-      .map(line => line.replace(/^[•\-*]\s*/, ''))
-      .filter(line => line.length > 10);
-    
-    if (items.length > 0) {
-      extractedSections.push({ title, items });
-    }
-  }
-  
-  // If we found sections, display them
-  if (extractedSections.length > 0) {
-    return (
-      <div className="space-y-4">
-        {extractedSections.map((section, sIdx) => (
-          <div key={sIdx}>
-            <h4 className="text-xs font-mono text-amber-400/80 mb-2">
-              {section.title}
-            </h4>
-            <ul className="space-y-1.5">
-              {section.items.slice(0, 5).map((item, itemIdx) => (
-                <li key={itemIdx} className="text-sm text-gray-300 flex items-start gap-2">
-                  <span className="text-amber-600 mt-1">•</span>
-                  <span className="leading-relaxed">{item}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-    );
-  }
-  
-  // Otherwise, extract bullet points from the cleaned content
-  const bulletPoints = cleaned
+  // Split by lines and group into sections
+  const lines = cleaned
     .split('\n')
     .map(line => line.trim())
-    .filter(line => line.startsWith('•') || line.startsWith('-') || line.startsWith('*'))
-    .map(line => line.replace(/^[•\-*]\s*/, ''))
-    .filter(line => line.length > 15);
+    .filter(line => line.length > 0 && !line.match(/^[{}\[\]":,]+$/));
   
-  if (bulletPoints.length > 0) {
+  if (lines.length === 0) {
     return (
-      <ul className="space-y-2">
-        {bulletPoints.slice(0, 8).map((item, idx) => (
-          <li key={idx} className="text-sm text-gray-300 flex items-start gap-2">
-            <span className="text-amber-600 mt-1">•</span>
-            <span className="leading-relaxed">{item}</span>
-          </li>
-        ))}
-        {bulletPoints.length > 8 && (
-          <li className="text-xs text-gray-500 italic pl-4">
-            + {bulletPoints.length - 8} more items...
-          </li>
-        )}
-      </ul>
+      <p className="text-sm text-gray-500 italic">
+        Activity captured but no detailed summary available.
+      </p>
     );
   }
   
-  // Last resort: display as paragraphs, but clean it thoroughly
-  const paragraphs = cleaned
-    .split('\n\n')
-    .map(p => p.trim())
-    .filter(p => p.length > 20 && !p.match(/^[{}\[\]":,]+$/));
+  // Check if we have bullet points to wrap in ul
+  const hasBullets = lines.some(line => line.match(/^[•\-*]\s+/));
   
-  if (paragraphs.length > 0) {
-    return (
-      <div className="space-y-3">
-        {paragraphs.slice(0, 3).map((para, idx) => (
-          <p key={idx} className="text-sm text-gray-300 leading-relaxed">
-            {para}
-          </p>
-        ))}
-      </div>
-    );
+  if (hasBullets) {
+    // Group consecutive bullets
+    const groups: React.ReactElement[][] = [];
+    let currentGroup: React.ReactElement[] = [];
+    
+    lines.forEach((line, idx) => {
+      const element = renderFormattedLine(line, idx);
+      
+      // Skip null elements (filtered metadata)
+      if (element === null) return;
+      
+      if (line.match(/^[•\-*]\s+/)) {
+        currentGroup.push(element);
+      } else {
+        if (currentGroup.length > 0) {
+          groups.push([<ul key={`group-${groups.length}`} className="space-y-1 mb-3">{currentGroup}</ul>]);
+          currentGroup = [];
+        }
+        groups.push([element]);
+      }
+    });
+    
+    if (currentGroup.length > 0) {
+      groups.push([<ul key={`group-${groups.length}`} className="space-y-1 mb-3">{currentGroup}</ul>]);
+    }
+    
+    return <div className="space-y-2">{groups}</div>;
   }
   
-  // Nothing meaningful found
+  // No bullets, just render lines (filter out nulls)
   return (
-    <p className="text-sm text-gray-500 italic">
-      Activity captured but no detailed summary available.
-    </p>
+    <div className="space-y-2">
+      {lines.map((line, idx) => renderFormattedLine(line, idx)).filter(el => el !== null)}
+    </div>
   );
 };
 
-// Helper: Get icon for section type
+// Helper: Get icon for section type (matching Pieces Desktop format)
 function getSectionIcon(sectionTitle: string): string {
   const title = sectionTitle.toLowerCase();
   if (title.includes('task') || title.includes('project')) return '📋';
-  if (title.includes('discussion') || title.includes('decision')) return '💬';
-  if (title.includes('document') || title.includes('code')) return '📁';
-  if (title.includes('technical') || title.includes('implementation')) return '⚙️';
+  if (title.includes('discussion') || title.includes('decision')) return '💡';
+  if (title.includes('document') || title.includes('code') || title.includes('reviewed')) return '📄';
+  if (title.includes('next') || title.includes('step')) return '⏭️';
   return '📌';
 }
 
@@ -616,11 +773,27 @@ const ConversationsTab: React.FC = () => {
   const [sessions, setSessions] = useState<ConversationSession[]>([]);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Load recent conversation sessions (last 7 days)
+  const loadSessions = () => {
+    // Load recent conversation sessions (last 7 days) - only shows sessions with at least 1 message
     const recentSessions = getRecentSessions(7);
     setSessions(recentSessions);
+  };
+
+  useEffect(() => {
+    loadSessions();
   }, []);
+
+  const handleDeleteSession = (sessionId: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // Prevent expanding the session
+    
+    if (confirm('Are you sure you want to delete this conversation session? This cannot be undone.')) {
+      deleteSession(sessionId);
+      loadSessions(); // Reload sessions after deletion
+      if (expandedSession === sessionId) {
+        setExpandedSession(null);
+      }
+    }
+  };
 
   const formatDate = (isoString: string) => {
     const date = new Date(isoString);
@@ -681,8 +854,17 @@ const ConversationsTab: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                  <div className="text-amber-500/50">
-                    {expandedSession === session.id ? '▼' : '▶'}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => handleDeleteSession(session.id, e)}
+                      className="px-2 py-1 text-xs font-mono text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded border border-red-800/30 hover:border-red-700/50 transition-all"
+                      title="Delete this session"
+                    >
+                      🗑️ Delete
+                    </button>
+                    <div className="text-amber-500/50">
+                      {expandedSession === session.id ? '▼' : '▶'}
+                    </div>
                   </div>
                 </div>
 
@@ -698,33 +880,39 @@ const ConversationsTab: React.FC = () => {
               {expandedSession === session.id && (
                 <div className="border-t border-gray-800/50 bg-black/20">
                   <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
-                    {session.messages.map((msg, msgIdx) => (
-                      <div 
-                        key={msgIdx}
-                        className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                      >
-                        <div className={`max-w-[80%] rounded-lg p-3 ${
-                          msg.role === 'user' 
-                            ? 'bg-amber-900/20 border border-amber-800/30' 
-                            : 'bg-gray-800/40 border border-gray-700/30'
-                        }`}>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-xs font-semibold text-gray-400">
-                              {msg.role === 'user' ? 'You' : 'Alfie'}
-                            </span>
-                            <span className="text-xs text-gray-600">
-                              {new Date(msg.timestamp).toLocaleTimeString()}
-                            </span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded ${
-                              msg.type === 'voice' ? 'bg-purple-900/30 text-purple-400' : 'bg-blue-900/30 text-blue-400'
-                            }`}>
-                              {msg.type === 'voice' ? '🎤' : '💬'}
-                            </span>
+                    {session.messages.length > 0 ? (
+                      session.messages.map((msg, msgIdx) => (
+                        <div 
+                          key={msgIdx}
+                          className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                        >
+                          <div className={`max-w-[80%] rounded-lg p-3 ${
+                            msg.role === 'user' 
+                              ? 'bg-amber-900/20 border border-amber-800/30' 
+                              : 'bg-gray-800/40 border border-gray-700/30'
+                          }`}>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-semibold text-gray-400">
+                                {msg.role === 'user' ? 'You' : 'Alfie'}
+                              </span>
+                              <span className="text-xs text-gray-600">
+                                {new Date(msg.timestamp).toLocaleTimeString()}
+                              </span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                msg.type === 'voice' ? 'bg-purple-900/30 text-purple-400' : 'bg-blue-900/30 text-blue-400'
+                              }`}>
+                                {msg.type === 'voice' ? '🎤' : '💬'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-300 whitespace-pre-wrap">{msg.content}</p>
                           </div>
-                          <p className="text-sm text-gray-300 whitespace-pre-wrap">{msg.content}</p>
                         </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8 text-gray-600">
+                        <p className="text-sm">No messages in this session.</p>
                       </div>
-                    ))}
+                    )}
                   </div>
                 </div>
               )}
@@ -743,9 +931,58 @@ const ConversationsTab: React.FC = () => {
   );
 };
 
-const LinearTab: React.FC<{ issues: LinearIssueData[]; connected?: boolean }> = ({ issues, connected }) => {
-  // Filter out cancelled issues
-  const activeIssues = issues.filter(issue => issue.statusType?.toLowerCase() !== 'canceled');
+// Helper to convert emoji shortcodes to actual emojis
+const convertEmojiShortcode = (shortcode: string | undefined): string => {
+  if (!shortcode) return '📁';
+  
+  // Common emoji shortcodes from Linear
+  const emojiMap: Record<string, string> = {
+    ':leftwards_arrow_with_hook:': '↩️',
+    ':arrow_with_hook:': '↩️',
+    ':sari:': '🥻',
+    ':necktie:': '👔',
+    ':brain:': '🧠',
+    ':briefcase:': '💼',
+    ':camera_with_flash:': '📸',
+    ':chart_with_downwards_trend:': '📉',
+    ':crossed_swords:': '⚔️',
+    ':guitar:': '🎸',
+    ':earth_africa:': '🌍',
+    ':flag-me:': '🇲🇪',
+    ':male-office-worker:': '👨‍💼',
+    ':potable_water:': '🚰',
+    ':package:': '📦',
+    ':busts_in_silhouette:': '👥',
+    'Android': '🤖',
+    'Bitcoin': '₿',
+  };
+  
+  return emojiMap[shortcode] || shortcode;
+};
+
+const LinearTab: React.FC<{ projects: LinearProjectData[]; issues: LinearIssueData[]; connected?: boolean }> = ({ projects, issues, connected }) => {
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+
+  // Filter out cancelled issues from both sources
+  const filterIssues = (issueList: LinearIssueData[]) => 
+    issueList.filter(issue => issue.statusType?.toLowerCase() !== 'canceled');
+
+  // Get issues not associated with any project
+  const orphanIssues = filterIssues(
+    issues.filter(issue => !issue.project || !projects.some(p => p.name === issue.project))
+  );
+
+  const toggleProject = (projectId: string) => {
+    setExpandedProjects(prev => {
+      const next = new Set(prev);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      return next;
+    });
+  };
 
   const getPriorityLabel = (priority: number) => {
     const labels = ['None', 'Urgent', 'High', 'Medium', 'Low'];
@@ -770,7 +1007,25 @@ const LinearTab: React.FC<{ issues: LinearIssueData[]; connected?: boolean }> = 
       'completed': 'text-green-400',
       'canceled': 'text-red-400',
     };
-    return colors[statusType] || 'text-gray-400';
+    return colors[statusType?.toLowerCase()] || 'text-gray-400';
+  };
+
+  const getProjectStateColor = (state: string) => {
+    const colors: Record<string, string> = {
+      'planned': 'text-gray-400 bg-gray-800/50 border-gray-700',
+      'started': 'text-blue-400 bg-blue-900/30 border-blue-700/50',
+      'paused': 'text-yellow-400 bg-yellow-900/30 border-yellow-700/50',
+      'completed': 'text-green-400 bg-green-900/30 border-green-700/50',
+      'canceled': 'text-red-400 bg-red-900/30 border-red-700/50',
+    };
+    return colors[state?.toLowerCase()] || 'text-gray-400 bg-gray-800/50 border-gray-700';
+  };
+
+  const getProgressColor = (progress: number) => {
+    if (progress >= 0.8) return 'bg-green-500';
+    if (progress >= 0.5) return 'bg-blue-500';
+    if (progress >= 0.25) return 'bg-yellow-500';
+    return 'bg-gray-600';
   };
 
   if (!connected) {
@@ -778,52 +1033,220 @@ const LinearTab: React.FC<{ issues: LinearIssueData[]; connected?: boolean }> = 
       <div className="text-center py-12">
         <div className="text-4xl mb-4">📋</div>
         <p className="text-lg text-gray-400 mb-2">Linear Not Connected</p>
-        <p className="text-sm text-gray-600">Unable to fetch Linear issues. Check your API key and backend connection.</p>
+        <p className="text-sm text-gray-600">Unable to fetch Linear data. Check your API key and backend connection.</p>
       </div>
     );
   }
 
+  const totalIssueCount = projects.reduce((sum, p) => sum + filterIssues(p.issues).length, 0) + orphanIssues.length;
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-bold text-gray-200">Active Issues</h2>
-        <span className="text-xs font-mono text-gray-500">{activeIssues.length} active {activeIssues.length !== 1 ? 'issues' : 'issue'}</span>
+    <div className="space-y-6">
+      {/* Header with stats */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-bold text-gray-200 flex items-center gap-2">
+            <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
+            Projects
+          </h2>
+          <p className="text-xs text-gray-500 font-mono mt-1">
+            {projects.length} project{projects.length !== 1 ? 's' : ''} • {totalIssueCount} active issue{totalIssueCount !== 1 ? 's' : ''}
+          </p>
+        </div>
       </div>
 
-      {activeIssues.length > 0 ? (
-        <div className="space-y-3">
-          {activeIssues.map((issue) => (
-            <div 
-              key={issue.id}
-              className="bg-gray-900/40 border border-gray-800 rounded-lg p-4 hover:border-indigo-500/30 transition-colors"
-            >
-              <div className="flex items-start gap-4">
-                <div className="flex-shrink-0">
-                  <span className={`text-xs font-mono px-2 py-1 rounded border ${getPriorityColor(issue.priority)}`}>
-                    {getPriorityLabel(issue.priority)}
-                  </span>
-                </div>
-                <div className="flex-grow min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-mono text-indigo-400">{issue.identifier}</span>
-                    <span className={`text-xs ${getStatusColor(issue.statusType)}`}>• {issue.status}</span>
+      {/* Projects List */}
+      {projects.length > 0 ? (
+        <div className="space-y-4">
+          {projects.map((project) => {
+            const projectIssues = filterIssues(project.issues);
+            const isExpanded = expandedProjects.has(project.id);
+            const inProgressCount = projectIssues.filter(i => i.statusType === 'started').length;
+            const completedCount = projectIssues.filter(i => i.statusType === 'completed').length;
+            const todoCount = projectIssues.filter(i => ['backlog', 'unstarted'].includes(i.statusType?.toLowerCase())).length;
+
+            return (
+              <div 
+                key={project.id}
+                className="bg-gray-900/40 border border-gray-800 rounded-lg overflow-hidden hover:border-indigo-500/30 transition-all"
+              >
+                {/* Project Header */}
+                <div 
+                  className="p-4 cursor-pointer hover:bg-gray-800/30 transition-colors"
+                  onClick={() => toggleProject(project.id)}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3">
+                      {/* Project Icon */}
+                      <div 
+                        className="w-10 h-10 rounded-lg flex items-center justify-center text-lg"
+                        style={{ 
+                          backgroundColor: project.color ? `${project.color}20` : 'rgba(99, 102, 241, 0.2)',
+                          borderColor: project.color || '#6366f1',
+                          borderWidth: '1px'
+                        }}
+                      >
+                        {convertEmojiShortcode(project.icon)}
+                      </div>
+                      <div className="flex-grow">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="text-base font-semibold text-gray-100">{project.name}</h3>
+                          <span className={`text-xs font-mono px-2 py-0.5 rounded border ${getProjectStateColor(project.state)}`}>
+                            {project.state}
+                          </span>
+                        </div>
+                        {project.description && (
+                          <p className="text-xs text-gray-500 line-clamp-1 max-w-lg">{project.description}</p>
+                        )}
+                        {/* Progress bar */}
+                        {project.progress > 0 && (
+                          <div className="flex items-center gap-2 mt-2">
+                            <div className="flex-grow h-1.5 bg-gray-800 rounded-full overflow-hidden max-w-32">
+                              <div 
+                                className={`h-full ${getProgressColor(project.progress)} rounded-full transition-all`}
+                                style={{ width: `${project.progress * 100}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-gray-500 font-mono">{Math.round(project.progress * 100)}%</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {/* Issue counts */}
+                      <div className="flex items-center gap-2 text-xs">
+                        {inProgressCount > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-blue-900/30 text-blue-400 font-mono">
+                            {inProgressCount} in progress
+                          </span>
+                        )}
+                        {todoCount > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">
+                            {todoCount} todo
+                          </span>
+                        )}
+                        {completedCount > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-green-900/30 text-green-400 font-mono">
+                            {completedCount} done
+                          </span>
+                        )}
+                      </div>
+                      {/* Expand indicator */}
+                      <div className="text-indigo-500/50">
+                        {isExpanded ? '▼' : '▶'}
+                      </div>
+                    </div>
                   </div>
-                  <h3 className="text-sm font-medium text-gray-200 mb-2">{issue.title}</h3>
-                  {(issue.project || issue.dueDate) && (
-                    <div className="flex items-center gap-3 text-xs text-gray-500">
-                      {issue.project && <span>📁 {issue.project}</span>}
-                      {issue.dueDate && <span>📅 {new Date(issue.dueDate).toLocaleDateString()}</span>}
+                  {/* Dates */}
+                  {(project.targetDate || project.lead) && (
+                    <div className="flex items-center gap-3 mt-2 ml-13 text-xs text-gray-600">
+                      {project.lead && <span>👤 {project.lead}</span>}
+                      {project.targetDate && (
+                        <span>🎯 Target: {new Date(project.targetDate).toLocaleDateString()}</span>
+                      )}
                     </div>
                   )}
                 </div>
+
+                {/* Expanded Issues */}
+                {isExpanded && projectIssues.length > 0 && (
+                  <div className="border-t border-gray-800/50 bg-black/20">
+                    <div className="p-3 space-y-1">
+                      {projectIssues.map((issue) => (
+                        <div 
+                          key={issue.id}
+                          className="flex items-center gap-3 p-2 rounded-md hover:bg-gray-800/30 transition-colors"
+                        >
+                          {/* Status indicator */}
+                          <div className={`w-4 h-4 rounded flex items-center justify-center text-xs ${
+                            issue.statusType === 'completed' 
+                              ? 'bg-green-900/30 text-green-400' 
+                              : issue.statusType === 'started'
+                              ? 'bg-blue-900/30 text-blue-400'
+                              : 'bg-gray-800 text-gray-500'
+                          }`}>
+                            {issue.statusType === 'completed' ? '✓' : issue.statusType === 'started' ? '▶' : '○'}
+                          </div>
+                          {/* Issue info */}
+                          <div className="flex-grow min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-mono text-indigo-400/70">{issue.identifier}</span>
+                              <span className={`text-sm truncate ${issue.statusType === 'completed' ? 'text-gray-500 line-through' : 'text-gray-300'}`}>
+                                {issue.title}
+                              </span>
+                            </div>
+                          </div>
+                          {/* Priority & assignee */}
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {issue.assignee && (
+                              <span className="text-xs text-gray-500">{issue.assignee}</span>
+                            )}
+                            <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${getPriorityColor(issue.priority)}`}>
+                              {getPriorityLabel(issue.priority)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {isExpanded && projectIssues.length === 0 && (
+                  <div className="border-t border-gray-800/50 bg-black/20 p-4 text-center text-gray-600 text-sm">
+                    No active issues in this project
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
-        <div className="text-center py-12 text-gray-600">
-          <p className="text-lg mb-2">No issues found</p>
-          <p className="text-sm">Your Linear issues will appear here.</p>
+        <div className="text-center py-8 text-gray-600 border border-dashed border-gray-800 rounded-lg">
+          <p className="text-lg mb-2">No projects found</p>
+          <p className="text-sm">Your Linear projects will appear here.</p>
+        </div>
+      )}
+
+      {/* Orphan Issues (not in any project) */}
+      {orphanIssues.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2">
+            <span className="text-gray-600">📝</span>
+            Issues without Project
+            <span className="text-xs font-mono text-gray-600">({orphanIssues.length})</span>
+          </h3>
+          <div className="bg-gray-900/30 border border-gray-800/50 rounded-lg p-3 space-y-1">
+            {orphanIssues.map((issue) => (
+              <div 
+                key={issue.id}
+                className="flex items-center gap-3 p-2 rounded-md hover:bg-gray-800/30 transition-colors"
+              >
+                <div className={`w-4 h-4 rounded flex items-center justify-center text-xs ${
+                  issue.statusType === 'completed' 
+                    ? 'bg-green-900/30 text-green-400' 
+                    : issue.statusType === 'started'
+                    ? 'bg-blue-900/30 text-blue-400'
+                    : 'bg-gray-800 text-gray-500'
+                }`}>
+                  {issue.statusType === 'completed' ? '✓' : issue.statusType === 'started' ? '▶' : '○'}
+                </div>
+                <div className="flex-grow min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-indigo-400/70">{issue.identifier}</span>
+                    <span className={`text-sm truncate ${issue.statusType === 'completed' ? 'text-gray-500 line-through' : 'text-gray-300'}`}>
+                      {issue.title}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className={`text-xs ${getStatusColor(issue.statusType)}`}>{issue.status}</span>
+                  <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${getPriorityColor(issue.priority)}`}>
+                    {getPriorityLabel(issue.priority)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -879,64 +1302,6 @@ const NotionTab: React.FC<{ pages: NotionPage[]; connected?: boolean }> = ({ pag
           <p className="text-sm">Your recently edited Notion pages will appear here.</p>
         </div>
       )}
-    </div>
-  );
-};
-
-const NotesTab: React.FC<{ 
-  notes: string; 
-  setNotes: (notes: string) => void;
-  onSave: () => void;
-  saved: boolean;
-}> = ({ notes, setNotes, onSave, saved }) => {
-  return (
-    <div className="max-w-3xl mx-auto">
-      <div className="mb-6">
-        <h2 className="text-lg font-bold text-gray-200 mb-2">Notes to Alfie</h2>
-        <p className="text-sm text-gray-500">
-          Add context, priorities, or reminders that Alfie should know about. 
-          This information will be included in every conversation.
-        </p>
-      </div>
-
-      <div className="bg-gray-900/30 border border-gray-800 rounded-lg p-4">
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          placeholder="Example:
-- Current sprint focus: Alfie Business Manager MVP
-- Key deadline: Demo on Friday
-- Important context: We're pivoting from X to Y
-- Remind me to: Follow up on the Linear integration"
-          className="w-full h-64 bg-black/30 border border-gray-700 rounded-lg p-4 text-gray-300 text-sm font-mono placeholder:text-gray-700 focus:outline-none focus:border-amber-500/50 resize-none"
-        />
-        
-        <div className="flex justify-between items-center mt-4">
-          <span className="text-xs text-gray-600">
-            {notes.length} characters • Alfie will see this in every conversation
-          </span>
-          <button
-            onClick={onSave}
-            className={`px-4 py-2 rounded font-mono text-sm transition-all ${
-              saved 
-                ? 'bg-green-600/20 text-green-400 border border-green-600/30' 
-                : 'bg-amber-600/20 text-amber-400 border border-amber-600/30 hover:bg-amber-600/30'
-            }`}
-          >
-            {saved ? '✓ SAVED' : 'SAVE NOTES'}
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-6 p-4 bg-blue-900/10 border border-blue-800/30 rounded-lg">
-        <h3 className="text-sm font-bold text-blue-300 mb-2">💡 Tips for effective notes:</h3>
-        <ul className="text-xs text-blue-200/70 space-y-1">
-          <li>• Be specific about current priorities and deadlines</li>
-          <li>• Mention any context that isn't captured in your Pieces activity</li>
-          <li>• Include names of key stakeholders or projects</li>
-          <li>• Update regularly as your focus shifts</li>
-        </ul>
-      </div>
     </div>
   );
 };

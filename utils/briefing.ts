@@ -57,8 +57,11 @@ export interface IntelligenceDossier {
   // Raw data for Alfie's context
   rawContext: string;
   
-  // Linear issues
+  // Linear issues (flat list, for backwards compatibility)
   linearIssues: LinearIssueData[];
+  
+  // Linear projects with nested issues
+  linearProjects: LinearProjectData[];
   
   // Notion pages
   notionPages: NotionPage[];
@@ -108,6 +111,22 @@ export interface LinearIssueData {
   statusType: string;
   dueDate?: string;
   project?: string;
+  assignee?: string;
+}
+
+export interface LinearProjectData {
+  id: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  state: string;
+  progress: number;
+  startDate?: string;
+  targetDate?: string;
+  updatedAt: string;
+  lead?: string;
+  issues: LinearIssueData[];
 }
 
 // ============================================================================
@@ -154,6 +173,7 @@ interface FullBriefingResponse {
   linear: {
     total: number;
     issues: LinearIssueData[];
+    projects?: LinearProjectData[];
   } | null;
   notion: {
     total: number;
@@ -308,7 +328,7 @@ function parsePiecesData(raw: RawPiecesResponse): {
   }
 
   return {
-    events: events.sort((a, b) => b.score - a.score).slice(0, 20),
+    events: [], // NO EVENTS - user only wants workstream summaries
     summaries,
     activeProjects: Array.from(activeProjects.values()).sort((a, b) => b.activityCount - a.activityCount),
     decisions: decisions.slice(0, 15) // Increased from 10 to capture more context
@@ -594,6 +614,9 @@ export async function generateIntelligenceDossier(forceRefresh = false): Promise
 
   // Extract Linear issues
   const linearIssues: LinearIssueData[] = fullData.linear?.issues || [];
+  
+  // Extract Linear projects with their issues
+  const linearProjects: LinearProjectData[] = fullData.linear?.projects || [];
 
   // Extract Notion pages
   const notionPages: NotionPage[] = fullData.notion?.pages || [];
@@ -623,6 +646,7 @@ export async function generateIntelligenceDossier(forceRefresh = false): Promise
     userNotes: getUserNotes(),
     rawContext,
     linearIssues,
+    linearProjects,
     notionPages,
     dataSources: {
       pieces: !!fullData.pieces,
@@ -766,13 +790,7 @@ function buildRawContext(
     context += '\n';
   }
 
-  // Recent Activity events (if available)
-  if (events.length > 0) {
-    context += '### RECENT ACTIVITY (Top 10 by relevance)\n';
-    events.slice(0, 10).forEach((e, i) => {
-      context += `${i + 1}. [${e.app}] ${e.windowTitle} - ${e.readableTime}\n`;
-    });
-  }
+  // NOTE: Events are no longer included - only structured workstream summaries
 
   return context;
 }
@@ -939,6 +957,7 @@ export async function fetchDossierFromSupabase(): Promise<IntelligenceDossier | 
       timeline: data.timeline || [],
       events: data.events || [],
       linearIssues: data.linear_issues || [],
+      linearProjects: [], // Fetch fresh from Linear API rather than storing in DB
       notionPages: data.notion_pages || [],
       userNotes: data.user_notes || '',
       rawContext: data.raw_context || '',
@@ -987,6 +1006,7 @@ export async function generateIntelligenceDossierWithFallback(forceRefresh = fal
     timeline: [],
     events: [],
     linearIssues: [],
+    linearProjects: [],
     notionPages: [],
     userNotes: '',
     rawContext: '',

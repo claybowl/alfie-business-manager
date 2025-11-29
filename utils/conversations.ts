@@ -128,8 +128,21 @@ export function getRecentSessions(days: number = 7): ConversationSession[] {
   cutoffDate.setDate(cutoffDate.getDate() - days);
   
   return sessions.filter(session => {
-    return new Date(session.startTime) >= cutoffDate;
+    // Filter by date and only show sessions with at least 1 message
+    return new Date(session.startTime) >= cutoffDate && session.messages.length > 0;
   });
+}
+
+// Delete a specific session by ID
+export function deleteSession(sessionId: string): void {
+  const sessions = getAllSessions();
+  const filteredSessions = sessions.filter(s => s.id !== sessionId);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(filteredSessions));
+  
+  // If we deleted the current session, clear the current session ID
+  if (currentSessionId === sessionId) {
+    currentSessionId = null;
+  }
 }
 
 // Generate summary of conversation

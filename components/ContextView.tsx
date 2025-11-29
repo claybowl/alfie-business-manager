@@ -515,7 +515,6 @@ export const ContextView: React.FC = () => {
     // Reheat simulation and run longer
     setIsSimulationRunning(true);
     graph.d3ReheatSimulation();
-    graph.cooldownTicks(300);
 
     // Auto-freeze after 6 seconds to let nodes settle
     setTimeout(() => {

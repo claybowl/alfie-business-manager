@@ -4,6 +4,7 @@ import cors from 'cors';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import EventSource from 'eventsource';
+import { createClient } from '@supabase/supabase-js';
 
 // Polyfill EventSource for Node.js environment
 global.EventSource = EventSource;
@@ -280,6 +281,96 @@ app.get('/api/linear/me', async (req, res) => {
         res.json(data.data?.viewer || {});
     } catch (error) {
         console.error('Error fetching Linear user:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get Linear projects with their issues
+app.get('/api/linear/projects', async (req, res) => {
+    try {
+        const response = await fetch('https://api.linear.app/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': LINEAR_API_KEY
+            },
+            body: JSON.stringify({
+                query: `
+                    query {
+                        projects(first: 20, orderBy: updatedAt) {
+                            nodes {
+                                id
+                                name
+                                description
+                                icon
+                                color
+                                state
+                                progress
+                                startDate
+                                targetDate
+                                updatedAt
+                                lead {
+                                    name
+                                }
+                                issues(first: 25) {
+                                    nodes {
+                                        id
+                                        identifier
+                                        title
+                                        priority
+                                        state {
+                                            name
+                                            type
+                                        }
+                                        dueDate
+                                        assignee {
+                                            name
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                `
+            })
+        });
+
+        const data = await response.json();
+        
+        if (data.errors) {
+            console.error('Linear API errors:', data.errors);
+            return res.status(400).json({ error: data.errors[0]?.message || 'Linear API error' });
+        }
+
+        const projects = data.data?.projects?.nodes || [];
+        res.json({ 
+            total: projects.length,
+            projects: projects.map(project => ({
+                id: project.id,
+                name: project.name,
+                description: project.description?.substring(0, 300) || '',
+                icon: project.icon,
+                color: project.color,
+                state: project.state,
+                progress: project.progress,
+                startDate: project.startDate,
+                targetDate: project.targetDate,
+                updatedAt: project.updatedAt,
+                lead: project.lead?.name,
+                issues: (project.issues?.nodes || []).map(issue => ({
+                    id: issue.id,
+                    identifier: issue.identifier,
+                    title: issue.title,
+                    priority: issue.priority,
+                    status: issue.state?.name || 'Unknown',
+                    statusType: issue.state?.type || 'unknown',
+                    dueDate: issue.dueDate,
+                    assignee: issue.assignee?.name
+                }))
+            }))
+        });
+    } catch (error) {
+        console.error('Error fetching Linear projects:', error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -650,7 +741,7 @@ async function fetchMultiplePagesContent(pages, maxPagesWithContent = 15, maxCha
 let workstreamContextStore = {
     summaries: [], // Array of { date: string, dayLabel: string, summary: string, fetchedAt: string }
     lastFullFetch: null,
-    maxDays: 5 // Rolling window - keep last 5 days
+    maxDays: 14 // Rolling window - keep last 14 days
 };
 
 // Generate date labels for querying
@@ -743,53 +834,49 @@ function parsePiecesLTMResponse(response) {
     }
 }
 
-// Fetch comprehensive workstream data for a specific day - RAW DATA EXTRACTION
+// Fetch comprehensive workstream data for a specific day - STRUCTURED SUMMARY
 async function fetchDaySummary(dayInfo) {
     if (!mcpClient) return null;
     
     try {
         const timeframe = dayInfo.dayIndex === 0 ? "today" : dayInfo.queryLabel;
         
-        // Request RAW activity data in JSON format - this is the key!
+        // Request a well-structured workstream summary (like Pieces Desktop shows)
         const result = await mcpClient.callTool({
             name: "ask_pieces_ltm",
             arguments: {
-                question: `Give me the complete raw activity log for ${timeframe} in JSON format. Include all summaries, events, applications, files opened, code edits, conversations, and timestamps. Return the full JSON structure with all details.`,
-                topics: ["development", "coding", "files", "projects", "work"],
-                application_sources: ["Cursor", "Cursor.exe"],
+                question: `Give me a comprehensive workstream summary for ${timeframe}. Format the response with these sections:
+
+**Core Tasks & Projects** - List all projects worked on with detailed descriptions of what was done
+**Key Discussions & Decisions** - Important decisions made and discussions had
+**Documents & Code Reviewed** - Files, documents, websites, and code reviewed with full paths/URLs
+**Next Steps** - Planned next actions
+
+Be thorough and detailed. Include file paths, URLs, project names, and specific accomplishments.`,
+                topics: ["development", "coding", "files", "projects", "work", "documentation"],
+                application_sources: ["Cursor", "Cursor.exe", "chrome.exe", "msedge.exe", "brave.exe", "Notion.exe", "Notion", "Discord.exe", "Discord", "Linear.exe", "WindowsTerminal.exe"],
                 chat_llm: "gemini-2.0-flash-exp",
                 connected_client: "Alfie"
             }
         });
         
-        // Parse the raw JSON response
-        const rawData = parsePiecesLTMResponse(result);
+        // Extract the text response directly
+        const responseText = result?.content?.[0]?.text || '';
         
-        if (!rawData || (Array.isArray(rawData) && rawData.length === 0)) {
+        if (!responseText || responseText.length < 50) {
             console.log(`No significant activity for ${dayInfo.label}`);
             return null;
         }
         
-        // Organize data by type
-        const summaries = Array.isArray(rawData) ? rawData.filter(item => item.type === 'summary') : [];
-        const events = Array.isArray(rawData) ? rawData.filter(item => item.type === 'event') : [];
-        const allActivities = Array.isArray(rawData) ? rawData : [rawData];
-        
-        // Build comprehensive summary with rich context
+        // Return the structured summary directly (no JSON parsing needed)
         const summary = {
             date: dayInfo.dateStr,
             dayLabel: dayInfo.label,
             dayIndex: dayInfo.dayIndex,
             fetchedAt: new Date().toISOString(),
             
-            // Store ALL the rich data
-            coreTasks: summaries.slice(0, 10), // Top 10 summaries by score
-            keyDecisions: summaries.slice(0, 10),
-            documentsReviewed: events.slice(0, 15), // Top 15 events by score
-            nextSteps: allActivities.slice(0, 5),
-            
-            // Rich text summary with ALL details
-            summary: formatComprehensiveSummary(summaries, events)
+            // The raw text summary from Pieces LTM - already formatted!
+            summary: responseText
         };
         
         return summary;
@@ -875,7 +962,7 @@ app.get('/api/pieces/workstream-summaries', async (req, res) => {
     }
 
     const forceRefresh = req.query.refresh === 'true';
-    const daysToFetch = parseInt(req.query.days) || 7;
+    const daysToFetch = parseInt(req.query.days) || 14;
     
     // Check if we have recent data (within last 30 minutes) and not forcing refresh
     const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
@@ -949,7 +1036,7 @@ app.get('/api/briefing/full', async (req, res) => {
             
             // First, trigger/get the multi-day summaries
             const forceRefresh = false;
-            const daysToFetch = 7;
+            const daysToFetch = 14;
             
             // Check cache first
             const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
@@ -1002,7 +1089,7 @@ app.get('/api/briefing/full', async (req, res) => {
                 message: `Retrieved ${newSummaries.length} new summaries`
             };
         })(),
-        // Linear
+        // Linear - fetch both issues and projects
         (async () => {
             const response = await fetch('https://api.linear.app/graphql', {
                 method: 'POST',
@@ -1013,7 +1100,7 @@ app.get('/api/briefing/full', async (req, res) => {
                 body: JSON.stringify({
                     query: `
                         query {
-                            issues(first: 10, orderBy: updatedAt) {
+                            issues(first: 30, orderBy: updatedAt) {
                                 nodes {
                                     id
                                     identifier
@@ -1021,7 +1108,34 @@ app.get('/api/briefing/full', async (req, res) => {
                                     priority
                                     state { name type }
                                     dueDate
+                                    assignee { name }
                                     project { name }
+                                }
+                            }
+                            projects(first: 15, orderBy: updatedAt) {
+                                nodes {
+                                    id
+                                    name
+                                    description
+                                    icon
+                                    color
+                                    state
+                                    progress
+                                    startDate
+                                    targetDate
+                                    updatedAt
+                                    lead { name }
+                                    issues(first: 20) {
+                                        nodes {
+                                            id
+                                            identifier
+                                            title
+                                            priority
+                                            state { name type }
+                                            dueDate
+                                            assignee { name }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1030,6 +1144,7 @@ app.get('/api/briefing/full', async (req, res) => {
             });
             const data = await response.json();
             const issues = data.data?.issues?.nodes || [];
+            const projects = data.data?.projects?.nodes || [];
             return {
                 total: issues.length,
                 issues: issues.map(issue => ({
@@ -1040,7 +1155,31 @@ app.get('/api/briefing/full', async (req, res) => {
                     status: issue.state?.name || 'Unknown',
                     statusType: issue.state?.type || 'unknown',
                     dueDate: issue.dueDate,
+                    assignee: issue.assignee?.name,
                     project: issue.project?.name
+                })),
+                projects: projects.map(project => ({
+                    id: project.id,
+                    name: project.name,
+                    description: project.description?.substring(0, 300) || '',
+                    icon: project.icon,
+                    color: project.color,
+                    state: project.state,
+                    progress: project.progress,
+                    startDate: project.startDate,
+                    targetDate: project.targetDate,
+                    updatedAt: project.updatedAt,
+                    lead: project.lead?.name,
+                    issues: (project.issues?.nodes || []).map(issue => ({
+                        id: issue.id,
+                        identifier: issue.identifier,
+                        title: issue.title,
+                        priority: issue.priority,
+                        status: issue.state?.name || 'Unknown',
+                        statusType: issue.state?.type || 'unknown',
+                        dueDate: issue.dueDate,
+                        assignee: issue.assignee?.name
+                    }))
                 }))
             };
         })(),
@@ -1112,6 +1251,354 @@ app.get('/api/briefing/full', async (req, res) => {
     }
 
     res.json(results);
+});
+
+// ============================================================================
+// WORKSTREAM SUMMARIES ENDPOINTS (Context Priming)
+// ============================================================================
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+let supabaseClient = null;
+if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+    supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
+
+// Save a structured workstream summary (from Pieces LTM)
+app.post('/api/workstream-summaries', async (req, res) => {
+    if (!supabaseClient) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+    }
+
+    try {
+        const { summary_date, day_label, core_tasks, key_discussions, documents_reviewed, next_steps, raw_summary, source, is_manual, tags } = req.body;
+
+        if (!summary_date || !day_label) {
+            return res.status(400).json({ error: 'summary_date and day_label are required' });
+        }
+
+        const { data, error } = await supabaseClient
+            .from('workstream_summaries')
+            .insert([{
+                summary_date,
+                day_label,
+                core_tasks: core_tasks || '',
+                key_discussions: key_discussions || '',
+                documents_reviewed: documents_reviewed || '',
+                next_steps: next_steps || '',
+                raw_summary: raw_summary || '',
+                source: source || 'pieces',
+                is_manual: is_manual || false,
+                tags: tags || []
+            }])
+            .select();
+
+        if (error) {
+            console.error('Error saving summary:', error);
+            return res.status(400).json({ error: error.message });
+        }
+
+        res.json({
+            success: true,
+            message: 'Summary saved successfully',
+            data: data?.[0]
+        });
+    } catch (error) {
+        console.error('Error in POST /api/workstream-summaries:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Get recent workstream summaries (for context priming)
+app.get('/api/workstream-summaries', async (req, res) => {
+    if (!supabaseClient) {
+        return res.status(503).json({ error: 'Supabase not configured', summaries: [] });
+    }
+
+    try {
+        const days = parseInt(req.query.days) || 14;
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - days);
+
+        const { data, error } = await supabaseClient
+            .from('workstream_summaries')
+            .select('*')
+            .gte('summary_date', cutoffDate.toISOString().split('T')[0])
+            .order('summary_date', { ascending: false });
+
+        if (error) {
+            console.error('Error fetching summaries:', error);
+            return res.status(400).json({ error: error.message, summaries: [] });
+        }
+
+        res.json({
+            total: (data || []).length,
+            summaries: data || [],
+            days: days
+        });
+    } catch (error) {
+        console.error('Error in GET /api/workstream-summaries:', error);
+        res.status(500).json({ error: error.message, summaries: [] });
+    }
+});
+
+// Get today's workstream summary specifically
+app.get('/api/workstream-summaries/today', async (req, res) => {
+    if (!supabaseClient) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+    }
+
+    try {
+        const today = new Date().toISOString().split('T')[0];
+
+        const { data, error } = await supabaseClient
+            .from('workstream_summaries')
+            .select('*')
+            .eq('summary_date', today)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+            console.error('Error fetching today summary:', error);
+            return res.status(400).json({ error: error.message });
+        }
+
+        res.json({
+            summary: data || null,
+            today: today
+        });
+    } catch (error) {
+        console.error('Error in GET /api/workstream-summaries/today:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Update a workstream summary (mark as locked, add tags, etc.)
+app.patch('/api/workstream-summaries/:id', async (req, res) => {
+    if (!supabaseClient) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+    }
+
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+
+        const { data, error } = await supabaseClient
+            .from('workstream_summaries')
+            .update(updates)
+            .eq('id', id)
+            .select();
+
+        if (error) {
+            console.error('Error updating summary:', error);
+            return res.status(400).json({ error: error.message });
+        }
+
+        res.json({
+            success: true,
+            message: 'Summary updated',
+            data: data?.[0]
+        });
+    } catch (error) {
+        console.error('Error in PATCH /api/workstream-summaries/:id:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ============================================================================
+// WORKSTREAM MIGRATION - Import historical data from Pieces
+// ============================================================================
+
+// Parse a summary section from markdown content
+function extractSectionContent(content, sectionName) {
+    if (!content || typeof content !== 'string') return '';
+
+    // Pattern: **Section Name** followed by content until next section
+    const regex = new RegExp(`\\*\\*${sectionName}\\*\\*\\s*\n(.*?)(?=\\*\\*[A-Z]|$)`, 'is');
+    const match = content.match(regex);
+
+    if (match && match[1]) {
+        return match[1].trim();
+    }
+    return '';
+}
+
+// Extract tags from summary content
+function extractTagsFromSummary(content) {
+    const tags = new Set();
+
+    if (!content || typeof content !== 'string') return [];
+
+    // Extract bold project names
+    const projectMatches = content.match(/\*\*([A-Za-z\s\-]+)\*\*/g);
+    if (projectMatches) {
+        projectMatches.forEach(match => {
+            const project = match.replace(/\*\*/g, '').trim();
+            if (project.length > 2 && project.length < 50) {
+                tags.add(project);
+            }
+        });
+    }
+
+    // Extract common keywords
+    const keywords = ['feature', 'bug', 'fix', 'design', 'documentation', 'refactor', 'deployment', 'review', 'meeting', 'discussion', 'testing'];
+    keywords.forEach(keyword => {
+        if (content.toLowerCase().includes(keyword)) {
+            tags.add(keyword);
+        }
+    });
+
+    return Array.from(tags);
+}
+
+// Migrate historical workstream summaries from Pieces (last N days)
+app.post('/api/workstream-summaries/migrate', async (req, res) => {
+    if (!mcpClient || !supabaseClient) {
+        return res.status(503).json({
+            error: 'Pieces MCP or Supabase not configured',
+            details: {
+                piecesConnected: !!mcpClient,
+                supabaseConfigured: !!supabaseClient
+            }
+        });
+    }
+
+    try {
+        const days = parseInt(req.body?.days) || 14;
+        console.log(`Starting migration of last ${days} days of workstream data...`);
+
+        // Fetch multi-day summaries from Pieces
+        console.log('Fetching workstream summaries from Pieces...');
+        const dateLabels = getDateLabels(days);
+
+        const fetchResults = await Promise.allSettled(
+            dateLabels.map(dayInfo => fetchDaySummary(dayInfo))
+        );
+
+        const fetchedSummaries = fetchResults
+            .filter(r => r.status === 'fulfilled' && r.value !== null)
+            .map(r => r.value);
+
+        console.log(`Fetched ${fetchedSummaries.length} summaries from Pieces`);
+
+        // Parse each summary into structured format
+        const parsedSummaries = fetchedSummaries.map(daySummary => {
+            const summaryContent = daySummary.summary || '';
+
+            return {
+                summary_date: daySummary.date,
+                day_label: daySummary.dayLabel,
+                core_tasks: extractSectionContent(summaryContent, 'Core Tasks & Projects'),
+                key_discussions: extractSectionContent(summaryContent, 'Key Discussions & Decisions'),
+                documents_reviewed: extractSectionContent(summaryContent, 'Documents & Code Reviewed'),
+                next_steps: extractSectionContent(summaryContent, 'Next Steps'),
+                raw_summary: summaryContent,
+                source: 'pieces',
+                is_manual: false,
+                tags: extractTagsFromSummary(summaryContent)
+            };
+        });
+
+        console.log(`Parsed ${parsedSummaries.length} summaries into structured format`);
+
+        // Check which dates already exist to avoid duplicates
+        const existingDates = new Set();
+        const { data: existingSummaries, error: fetchError } = await supabaseClient
+            .from('workstream_summaries')
+            .select('summary_date');
+
+        if (!fetchError && existingSummaries) {
+            existingSummaries.forEach(s => existingDates.add(s.summary_date));
+        }
+
+        // Filter to only new summaries
+        const newSummaries = parsedSummaries.filter(s => !existingDates.has(s.summary_date));
+        console.log(`Found ${newSummaries.length} new summaries to insert (${parsedSummaries.length - newSummaries.length} already exist)`);
+
+        if (newSummaries.length === 0) {
+            return res.json({
+                success: true,
+                message: 'Migration complete - all summaries already exist',
+                migrated: 0,
+                skipped: parsedSummaries.length,
+                total: parsedSummaries.length
+            });
+        }
+
+        // Insert all new summaries in one batch
+        const { data: inserted, error: insertError } = await supabaseClient
+            .from('workstream_summaries')
+            .insert(newSummaries)
+            .select();
+
+        if (insertError) {
+            console.error('Error inserting summaries:', insertError);
+            return res.status(400).json({
+                error: insertError.message,
+                details: insertError
+            });
+        }
+
+        console.log(`✓ Successfully migrated ${inserted?.length || 0} summaries to Supabase`);
+
+        res.json({
+            success: true,
+            message: `Migrated ${inserted?.length || 0} workstream summaries from last ${days} days`,
+            migrated: inserted?.length || 0,
+            skipped: parsedSummaries.length - (inserted?.length || 0),
+            total: parsedSummaries.length,
+            samples: inserted?.slice(0, 3) // Return sample of migrated data
+        });
+
+    } catch (error) {
+        console.error('Error during migration:', error);
+        res.status(500).json({
+            error: error.message,
+            stack: error.stack
+        });
+    }
+});
+
+// Get migration status (how many summaries exist?)
+app.get('/api/workstream-summaries/migration/status', async (req, res) => {
+    if (!supabaseClient) {
+        return res.status(503).json({ error: 'Supabase not configured' });
+    }
+
+    try {
+        const { count, error } = await supabaseClient
+            .from('workstream_summaries')
+            .select('*', { count: 'exact', head: true });
+
+        if (error) {
+            return res.status(400).json({ error: error.message });
+        }
+
+        // Get date range
+        const { data: dateData } = await supabaseClient
+            .from('workstream_summaries')
+            .select('summary_date')
+            .order('summary_date', { ascending: false })
+            .limit(1);
+
+        const { data: oldestData } = await supabaseClient
+            .from('workstream_summaries')
+            .select('summary_date')
+            .order('summary_date', { ascending: true })
+            .limit(1);
+
+        res.json({
+            totalSummaries: count || 0,
+            latestDate: dateData?.[0]?.summary_date || null,
+            oldestDate: oldestData?.[0]?.summary_date || null,
+            ready: count > 0
+        });
+    } catch (error) {
+        console.error('Error getting migration status:', error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // ============================================================================
