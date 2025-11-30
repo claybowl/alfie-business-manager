@@ -6,12 +6,14 @@ import { ChatView } from './components/ChatView';
 import { BriefingView } from './components/BriefingView';
 import { ContextView } from './components/ContextView';
 import { SettingsView } from './components/SettingsView';
-import { ChatIcon, KnowledgeGraphIcon, MicrophoneIcon, SettingsIcon, DocumentIcon } from './components/Icons';
+import { MeditationView } from './components/MeditationView';
+import { ChatIcon, KnowledgeGraphIcon, MicrophoneIcon, SettingsIcon, DocumentIcon, HaloIcon } from './components/Icons';
 
 type TabId = 'agent' | 'chat' | 'briefing' | 'context' | 'settings';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('agent');
+  const [showMeditation, setShowMeditation] = useState(false);
 
   const tabs = [
     { id: 'agent', label: 'Agent', icon: <MicrophoneIcon className="w-6 h-6" /> },
@@ -57,6 +59,21 @@ const App: React.FC = () => {
           </div>
         ))}
       </main>
+
+      {/* Inconspicuous Prayer Room Button - bottom right corner */}
+      <button
+        onClick={() => setShowMeditation(true)}
+        className="fixed bottom-4 right-4 w-10 h-10 rounded-full bg-slate-900/60 border border-amber-500/20 text-amber-300/40 hover:text-amber-300 hover:border-amber-400/50 hover:bg-slate-800/80 transition-all duration-500 flex items-center justify-center z-20 group"
+        title="Sanctuary"
+        aria-label="Open meditation sanctuary"
+      >
+        <HaloIcon className="w-5 h-5 group-hover:drop-shadow-[0_0_8px_rgba(251,191,36,0.6)] transition-all duration-500" />
+      </button>
+
+      {/* Meditation View Overlay */}
+      {showMeditation && (
+        <MeditationView onClose={() => setShowMeditation(false)} />
+      )}
 
       <style>{`
         .bg-grid-white\\[\\[0\\.05\\]] {

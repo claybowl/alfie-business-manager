@@ -1838,12 +1838,59 @@ app.get('/api/graph/deletion-stats', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
-  console.log('Data sources:');
-  console.log('  - Pieces MCP: Connecting...');
-  console.log('  - Linear API: Configured');
-  console.log('  - Notion API: Configured');
-  console.log(`  - Graphiti KG: ${GRAPHITI_SERVICE_URL}`);
-});
+// Graceful server startup with port conflict handling
+function startServer(port, maxRetries = 3) {
+  const server = app.listen(port, () => {
+    console.log(`Backend server running on http://localhost:${port}`);
+    console.log('Data sources:');
+    console.log('  - Pieces MCP: Connecting...');
+    console.log('  - Linear API: Configured');
+    console.log('  - Notion API: Configured');
+    console.log(`  - Graphiti KG: ${GRAPHITI_SERVICE_URL}`);
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`⚠️  Port ${port} is in use.`);
+      if (maxRetries > 0) {
+        const nextPort = port + 1;
+        console.log(`   Trying port ${nextPort}...`);
+        startServer(nextPort, maxRetries - 1);
+      } else {
+        console.error('❌ Could not find an available port. Please free up port 3002-3005 or wait a moment and try again.');
+        process.exit(1);
+      }
+    } else {
+      console.error('Server error:', err);
+      process.exit(1);
+    }
+  });
+
+  // Graceful shutdown handlers - prevents orphaned connections
+  const shutdown = (signal) => {
+    console.log(`\n${signal} received. Shutting down gracefully...`);
+    server.close(() => {
+      console.log('Server closed.');
+      process.exit(0);
+    });
+    // Force exit after 5 seconds if graceful shutdown fails
+    setTimeout(() => {
+      console.error('Forcing shutdown...');
+      process.exit(1);
+    }, 5000);
+  };
+
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  
+  // Handle uncaught exceptions gracefully
+  process.on('uncaughtException', (err) => {
+    console.error('Uncaught exception:', err);
+    shutdown('uncaughtException');
+  });
+
+  return server;
+}
+
+startServer(PORT);
 
